@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: mamulya-bot
+    runtime: python
+    plan: starter
+    buildCommand: ""
+    startCommand: python3 bot.py
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DB
+        value: /data/bot.db
+      - key: BOT_NAME
+        value: mamulyalvivbot
+      - key: DILA_CODE
+        value: "667562"
+      - key: ADMIN_IDS
+        value: "97039643"
+      - key: BOT_TOKEN
+        sync: false
+      - key: SALESDRIVE_KEY
+        sync: false
+      - key: ADMIN_KEY
+        sync: false
