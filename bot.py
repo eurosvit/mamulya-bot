@@ -319,6 +319,13 @@ class Hook(BaseHTTPRequestHandler):
             pages = int(qs.get("pages", ["1"])[0])
             threading.Thread(target=lambda: print("manual sync:", sync_orders(pages)), daemon=True).start()
             self.send_response(200); self.end_headers(); self.wfile.write(b"sync started"); return
+        if u.path == "/segments.csv" and authed:
+            self.send_response(200); self.send_header("Content-Type", "text/csv; charset=utf-8"); self.end_headers()
+            rows = ["phone;name;total;level;discount;next_level;to_next"]
+            for ph, total, lvl, pc, nx, need in base_levels():
+                nm = (DB.execute("select name from names where phone=?", (ph,)).fetchone() or [""])[0]
+                rows.append(f"{ph};{nm};{total:.0f};{lvl};{pc};{nx};{need:.0f}")
+            self.wfile.write("\n".join(rows).encode()); return
         if u.path != "/admin" or not authed:
             self.send_response(200); self.end_headers(); self.wfile.write(b"ok"); return
         self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
@@ -327,6 +334,17 @@ class Hook(BaseHTTPRequestHandler):
 
 STAGE_UA = {"pregnant": "Вагітність/0–1", "m0_3": "0–3 міс", "m3_6": "3–6 міс", "m6_12": "6–12 міс", "lipoland": "Lipoland", "unknown": "Невідомо"}
 GIFT_UA = {"dila": "Dila −20%", "coupon": "−10% Modnamama", "mam150": "−150 ₴ Mamulya", "freeship": "Безкошт. доставка", "referral": "Реферальна"}
+
+LVL = [(25000, 10, "Діамант"), (15000, 7, "VIP"), (9000, 5, "Смарт"), (4500, 3, "Базовий")]
+
+def base_levels():
+    rows = DB.execute("select phone, sum(amount) s from orders where phone!='' group by phone").fetchall()
+    out = []
+    for ph, total in rows:
+        cur = next(((t, p, n) for t, p, n in LVL if total >= t), (0, 0, "—"))
+        nxt = ([l for l in reversed(LVL) if total < l[0]] or [None])[0]
+        out.append((ph, total, cur[2], cur[1], nxt[2] if nxt else "", nxt[0] - total if nxt else 0))
+    return out
 
 def admin_page():
     q = lambda sql, *a: DB.execute(sql, a).fetchall()
@@ -337,6 +355,11 @@ def admin_page():
         return "".join(f"<tr><td>{names.get(r[0], r[0])}</td><td class=n>{r[1]}</td>"
                        f"<td class=b><i style=width:{int(r[1]/mx*100)}%></i></td></tr>" for r in rows)
     stages = q("select stage,count(*) from customers group by stage order by 2 desc")
+    base = base_levels()
+    lvl_counts = {}
+    for _, _, name, *_ in base: lvl_counts[name] = lvl_counts.get(name, 0) + 1
+    near = sorted([b for b in base if 0 < b[5] <= 1000], key=lambda b: b[5])[:200]
+    getname = lambda ph: (DB.execute("select name from names where phone=?", (ph,)).fetchone() or ["—"])[0]
     gifts = q("select gift,count(*) from gifts group by gift order by 2 desc")
     cust = q("select c.chat_id, coalesce(nullif(c.phone,''),'—'), coalesce((select name from names n where n.phone=c.phone),'—'), c.stage, c.dob, datetime(c.created,'unixepoch','localtime'), (select count(*) from gifts g where g.chat_id=c.chat_id) from customers c order by c.created desc limit 100")
     cards = [("Клієнтів у боті", n("select count(*) from customers")),
@@ -361,6 +384,11 @@ td.b{{width:40%}}td.b i{{display:block;height:8px;background:#B8325A;border-radi
 <h1>Mamulya Bot — кабінет</h1>
 <p style=color:#6E5F65>Оновлено {time.strftime("%d.%m %H:%M")} · автооновлення при перезавантаженні сторінки</p>
 <div class=cards>{"".join(f"<div class=card><b>{v}</b><span>{k}</span></div>" for k, v in cards)}</div>
+<h2>Рівні бази (усі {len(base)} клієнтів за сумою покупок) · <a href="/segments.csv?key={os.environ.get("ADMIN_KEY","")}">вивантажити CSV</a></h2>
+<table>{"".join(f"<tr><td>{n or '—'}</td><td class=n>{lvl_counts.get(n,0)}</td></tr>" for n in ["Діамант","VIP","Смарт","Базовий","—"])}</table>
+<h2>«Зовсім трішки» до наступного рівня (≤1000 ₴) — {len(near)} клієнтів</h2>
+<table><tr><th>Телефон</th><th>Імʼя</th><th>Сума</th><th>Рівень</th><th>До наступного</th></tr>
+{"".join(f"<tr><td>{b[0]}</td><td>{getname(b[0])}</td><td class=n>{b[1]:,.0f}".replace(",", " ") + f" ₴</td><td>{b[2]}</td><td class=n>{b[5]:,.0f}".replace(",", " ") + f" ₴ до «{b[4]}»</td></tr>" for b in near)}</table>
 <h2>Клієнти за стадіями</h2><table>{bar(stages, STAGE_UA)}</table>
 <h2>Обрані подарунки</h2><table>{bar(gifts, GIFT_UA)}</table>
 <h2>Що налаштовано: стадія ← товар</h2>
