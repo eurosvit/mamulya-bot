@@ -20,6 +20,8 @@ create table if not exists sent(chat_id int, key text, primary key(chat_id,key))
 create table if not exists pool(code text primary key, chat_id int, ts real);
 create table if not exists names(phone text primary key, name text);
 """)
+try: DB.execute("alter table orders add column amount real default 0")
+except Exception: pass
 DAY = 86400
 
 # ---------- helpers ----------
@@ -28,7 +30,8 @@ def tg(method, **kw):
     return json.load(urllib.request.urlopen(req, timeout=30))
 
 KB = {"keyboard": [[{"text": "🎁 Подарунки"}, {"text": "🎟 Мої купони"}],
-                   [{"text": "🛍 Добірка для малюка"}, {"text": "💬 Менеджер"}]],
+                   [{"text": "💎 Мій рівень"}, {"text": "🛍 Добірка для малюка"}],
+                   [{"text": "💬 Менеджер"}]],
       "resize_keyboard": True, "is_persistent": True}
 
 def send(chat_id, text, buttons=None):
@@ -92,7 +95,7 @@ def save_order(o, names=None):
     if phone and full: DB.execute("insert or replace into names values(?,?)", (phone, full))
     names = names or {}
     items = [p.get("name") or names.get(p.get("productId"), "") for p in o.get("products", [])]
-    DB.execute("insert or replace into orders values(?,?,?,?)", (str(o.get("id")), phone, json.dumps(items, ensure_ascii=False), time.time())); DB.commit()
+    DB.execute("insert or replace into orders values(?,?,?,?,?)", (str(o.get("id")), phone, json.dumps(items, ensure_ascii=False), time.time(), float(o.get("paymentAmount") or 0))); DB.commit()
     return phone, items
 
 # ---------- gifts ----------
@@ -163,6 +166,19 @@ def on_text(chat_id, text):
         rows += DB.execute("select code,ts+30*86400 from pool where chat_id=?", (chat_id,)).fetchall()
         if not rows: return send(chat_id, T["coupons_none"])
         return send(chat_id, "\n".join(f"🎟 <code>{c}</code> — до {time.strftime('%d.%m', time.localtime(e))}" for c, e in rows))
+    if t == "💎 Мій рівень":
+        row = DB.execute("select phone from customers where chat_id=?", (chat_id,)).fetchone()
+        if not row or not row[0]: return send(chat_id, "Спершу підтвердіть номер телефону: /start")
+        # ponytail: сума всіх замовлень без фільтра статусу — скасовані завищать; уточнимо, коли зберігатимемо статус
+        total = DB.execute("select coalesce(sum(amount),0) from orders where phone=?", (row[0],)).fetchone()[0]
+        lvls = [(25000, 10, "Діамант 💎"), (15000, 7, "VIP 👑"), (9000, 5, "Смарт 🧠"), (4500, 3, "Базовий 💙")]
+        cur = next(((th, pc, nm) for th, pc, nm in lvls if total >= th), None)
+        nxt = ([l for l in reversed(lvls) if total < l[0]] or [None])[0]
+        msg = f"💎 Ваші покупки в Mamulya + Modnamama: <b>{total:,.0f} ₴</b>\n".replace(",", " ")
+        msg += f"Рівень: <b>{cur[2]}</b> — постійна знижка {cur[1]}%\n" if cur else "Рівень: на старті програми 🚀\n"
+        if nxt: msg += f"До рівня «{nxt[2]}» ({nxt[1]}%) лишилось {nxt[0]-total:,.0f} ₴".replace(",", " ")
+        else: msg += "Це максимальний рівень — вітаємо! 🎉"
+        return send(chat_id, msg)
     if t == "🛍 Добірка для малюка":
         row = DB.execute("select stage from customers where chat_id=?", (chat_id,)).fetchone()
         st = row[0] if row and row[0] in LIFECYCLE else "unknown"
