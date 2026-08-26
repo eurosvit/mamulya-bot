@@ -370,7 +370,7 @@ def admin_page():
              ("Вільних кодів −150", n("select count(*) from pool where chat_id is null")),
              ("Нагадувань надіслано", n("select count(*) from sent"))]
     return f"""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>Mamulya Bot — кабінет</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>"><style>
+<title>Mamulya Bot — кабінет</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💛</text></svg>"><style>
 body{{font:14px/1.5 -apple-system,sans-serif;margin:0;background:#FBF7F5;color:#2B2226;padding:24px}}
 h1{{font-size:22px}}h2{{font-size:16px;margin:28px 0 8px}}
 .cards{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}}
