@@ -41,10 +41,10 @@ LIFECYCLE = {
     "m3_6":     [(60, "b1", "Скоро прикорм 🥄 Стільчик, тарілка Memoram, нагрудники:", MM + "6-12m"),
                  (120, "b2", "Одяг на зріст 68–80: нова добірка в Modnamama.", MM + "6-12m")],
     "m6_12":    [(60, "c1", "Рюкзак 2 розмір (від 6 кг) — для тих, хто вже сидить:", MM + "6-12m"),
-                 (150, "c2", "Перші ігри й книжечки — знайомтесь із Lipoland 🧩", "https://mamulya.lviv.ua/lipoland"),
-                 (540, "c3", "Вашій дитині ~2 роки — саме час для книжечок на липучках Lipoland.", "https://mamulya.lviv.ua/lipoland")],
-    "lipoland": [(60, "l1", "Нові набори Lipoland для наступного етапу:", "https://mamulya.lviv.ua/lipoland"),
-                 (180, "l2", "Візуальний розклад «Сплануй свій день» — структура дня без сліз.", "https://mamulya.lviv.ua/lipoland")],
+                 (150, "c2", "Перші ігри й книжечки — знайомтесь із Lipoland 🧩", "https://mamulya.lviv.ua/shop/brand/lipoland"),
+                 (540, "c3", "Вашій дитині ~2 роки — саме час для книжечок на липучках Lipoland.", "https://mamulya.lviv.ua/shop/brand/lipoland")],
+    "lipoland": [(60, "l1", "Нові набори Lipoland для наступного етапу:", "https://mamulya.lviv.ua/shop/brand/lipoland"),
+                 (180, "l2", "Візуальний розклад «Сплануй свій день» — структура дня без сліз.", "https://mamulya.lviv.ua/shop/brand/lipoland")],
     "unknown":  [(30, "u1", "У нас є ще один магазин — Modnamama: коляски, купання, одяг, іграшки, у 20 разів більше товарів, ніж на Mamulya 💛", "https://modnamama.ua")],
 }
 
