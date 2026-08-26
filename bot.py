@@ -297,7 +297,13 @@ class Hook(BaseHTTPRequestHandler):
     def do_GET(self):
         from urllib.parse import urlparse, parse_qs
         u = urlparse(self.path)
-        if u.path != "/admin" or parse_qs(u.query).get("key", [""])[0] != os.environ.get("ADMIN_KEY", ""):
+        qs = parse_qs(u.query)
+        authed = qs.get("key", [""])[0] == os.environ.get("ADMIN_KEY", "")
+        if u.path == "/sync" and authed:
+            pages = int(qs.get("pages", ["1"])[0])
+            threading.Thread(target=lambda: print("manual sync:", sync_orders(pages)), daemon=True).start()
+            self.send_response(200); self.end_headers(); self.wfile.write(b"sync started"); return
+        if u.path != "/admin" or not authed:
             self.send_response(200); self.end_headers(); self.wfile.write(b"ok"); return
         self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
         self.wfile.write(admin_page().encode())
