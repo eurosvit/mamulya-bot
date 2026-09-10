@@ -539,11 +539,7 @@ def admin_page():
     q = lambda sql, *a: DB.execute(sql, a).fetchall()
     n = lambda sql: q(sql)[0][0]
     now = time.time()
-    def bar(rows, names):
-        mx = max([r[1] for r in rows], default=1) or 1
-        return "".join(f"<tr><td>{names.get(r[0], r[0])}</td><td class=n>{r[1]}</td>"
-                       f"<td class=b><i style=width:{int(r[1]/mx*100)}%></i></td></tr>" for r in rows)
-    LAUNCH = 1789045200  # 10.09.2026 — старт SMS з посиланням на бота
+    LAUNCH = 1789045200  # 10.09.2026 — старт SMS
     orders_since = n(f"select count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8)")
     entered = n(f"select count(*) from customers where created>={LAUNCH}")
     conv = f"{entered/orders_since*100:.0f}%" if orders_since else "—"
@@ -551,80 +547,110 @@ def admin_page():
     picks = {r[0]: r[1] for r in q("select cnt, count(*) from (select c.chat_id, (select count(*) from gifts g where g.chat_id=c.chat_id) cnt from customers c) group by cnt")}
     p0 = picks.get(0, 0); p1 = picks.get(1, 0); p2 = sum(v for k, v in picks.items() if k >= 2)
     pickers = nc - p0
-    by_store_orders = dict(q(f"select coalesce(nullif(store,''),'інше'), count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8) group by 1"))
-    by_store_entered = dict(q(f"select coalesce(nullif(store,''),'інше'), count(*) from customers where created>={LAUNCH} group by 1"))
-    store_rows = ""
-    for st in sorted(set(by_store_orders) | set(by_store_entered), key=lambda x: -by_store_orders.get(x, 0)):
-        o, e = by_store_orders.get(st, 0), by_store_entered.get(st, 0)
-        store_rows += f"<tr><td style=padding-left:28px>· {st}</td><td class=n>{o}</td><td>у бот: {e} · конверсія {(e/o*100):.0f}%</td></tr>" if o else f"<tr><td style=padding-left:28px>· {st}</td><td class=n>0</td><td>у бот: {e}</td></tr>"
+    bso = dict(q(f"select coalesce(nullif(store,''),'інше'), count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8) group by 1"))
+    bse = dict(q(f"select coalesce(nullif(store,''),'інше'), count(*) from customers where created>={LAUNCH} group by 1"))
     stages = q("select stage,count(*) from customers group by stage order by 2 desc")
-    stores = q("select coalesce(nullif(store,''),'інше/маркетплейси'), count(*) from orders group by 1 order by 2 desc")
+    stores = q("select coalesce(nullif(store,''),'інше'), count(*) from orders group by 1 order by 2 desc")
     srcs = q("select coalesce(nullif(src,''),'—'), count(*) from customers group by 1 order by 2 desc")
+    gifts = q("select gift,count(*) from gifts group by gift order by 2 desc")
     base = base_levels()
     lvl_counts = {}
     for _, _, name, *_ in base: lvl_counts[name] = lvl_counts.get(name, 0) + 1
     near = sorted([b for b in base if 0 < b[5] <= 1000], key=lambda b: b[5])[:200]
     getname = lambda ph: (DB.execute("select name from names where phone=?", (ph,)).fetchone() or ["—"])[0]
-    gifts = q("select gift,count(*) from gifts group by gift order by 2 desc")
-    cust = q("select c.chat_id, coalesce(nullif(c.phone,''),'—'), coalesce((select name from names n where n.phone=c.phone),'—'), c.stage, c.dob, datetime(c.created,'unixepoch','localtime'), (select count(*) from gifts g where g.chat_id=c.chat_id) from customers c order by c.created desc limit 100")
     cptype = lambda pfx: (n(f"select count(*) from coupons where code like '{pfx}%'"), n(f"select count(*) from coupons where code like '{pfx}%' and expires>{now}"))
-    mm_all, mm_live = cptype("MAM"); zn_all, zn_live = cptype("ZNBOT")
-    cpn = q("select c.code, coalesce(nullif(cu.phone,''),c.chat_id), datetime(c.expires,'unixepoch','localtime'), c.expires>? , c.reminded from coupons c left join customers cu on cu.chat_id=c.chat_id order by c.expires desc limit 50", now)
-    cards = [("Клієнтів у боті", n("select count(*) from customers")),
-             ("З підтвердженим номером", n("select count(*) from customers where phone!=''")),
-             ("Замовлень у базі", n("select count(*) from orders")),
-             ("Подарунків видано", n("select count(*) from gifts")),
-             ("Активних купонів", n(f"select count(*) from coupons where expires>{now}")),
-             ("Видано −150 (натискань)", n("select count(*) from gifts where gift='mam150'")),
-             ("Нагадувань надіслано", n("select count(*) from sent"))]
-    return f"""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>Mamulya Bot — кабінет</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💛</text></svg>"><style>
-body{{font:14px/1.5 -apple-system,sans-serif;margin:0;background:#FBF7F5;color:#2B2226;padding:24px}}
-h1{{font-size:22px}}h2{{font-size:16px;margin:28px 0 8px}}
-.cards{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}}
-.card{{background:#fff;border:1px solid #E8DCD8;border-radius:10px;padding:12px 16px}}
-.card b{{font-size:26px;display:block}}.card span{{font-size:11px;color:#A1939A;text-transform:uppercase}}
-table{{border-collapse:collapse;background:#fff;border:1px solid #E8DCD8;border-radius:10px;width:100%;font-size:13px}}
-td,th{{padding:7px 12px;border-bottom:1px solid #E8DCD8;text-align:left}}
-td.n{{text-align:right;font-variant-numeric:tabular-nums}}
-td.b{{width:40%}}td.b i{{display:block;height:8px;background:#B8325A;border-radius:4px}}
+    mm_all, mm_live = cptype("MMBOT"); zn_all, zn_live = cptype("ZNBOT")
+    cpn = q("select c.code, coalesce(nullif(cu.phone,''),c.chat_id), datetime(c.expires,'unixepoch','localtime'), c.expires>?, c.reminded from coupons c left join customers cu on cu.chat_id=c.chat_id order by c.expires desc limit 50", now)
+    cust = q("select c.chat_id, coalesce(nullif(c.phone,''),'—'), coalesce((select name from names nm where nm.phone=c.phone),'—'), c.stage, c.dob, datetime(c.created,'unixepoch','localtime'), (select count(*) from gifts g where g.chat_id=c.chat_id), coalesce(nullif(c.src,''),'—'), coalesce(nullif(c.store,''),'—') from customers c order by c.created desc limit 100")
+    cards = [("Клієнтів у боті", nc), ("З номером", n("select count(*) from customers where phone!=''")),
+             ("Замовлень у базі", n("select count(*) from orders")), ("Подарунків", n("select count(*) from gifts")),
+             ("Активних купонів", n(f"select count(*) from coupons where expires>{now}")), ("Нагадувань", n("select count(*) from sent"))]
+
+    def rows(data, names=None, pct_of=None):
+        mx = max([r[1] for r in data], default=1) or 1
+        tot = pct_of or sum(r[1] for r in data) or 1
+        out = ""
+        for k, v in data:
+            label = (names or {}).get(k, k)
+            out += f"<tr><td>{label}</td><td class=n>{v}</td><td class=n>{v/tot*100:.0f}%</td><td class=b><i style=width:{int(v/mx*100)}%></i></td></tr>"
+        return out
+
+    SRC_UA = {"sms": "SMS", "qr": "QR з пакування", "web": "сайт", "migrate": "міграція", "direct": "самі знайшли", "—": "—"}
+    fun = f"""<tr><td>Замовлень з 10.09</td><td class=n>{orders_since}</td><td></td></tr>
+<tr><td><b>Перейшли в бот</b></td><td class=n><b>{entered}</b></td><td class=n><b>{conv}</b></td></tr>"""
+    for st in sorted(set(bso) | set(bse), key=lambda x: -bso.get(x, 0)):
+        o, e = bso.get(st, 0), bse.get(st, 0)
+        c = f"{e/o*100:.0f}%" if o else "—"
+        fun += f"<tr class=sub><td>{st}</td><td class=n>{o} → {e}</td><td class=n>{c}</td></tr>"
+    fun += f"""<tr><td>Нічого не обрали</td><td class=n>{p0}</td><td class=n>{(p0/nc*100 if nc else 0):.0f}%</td></tr>
+<tr><td>Обрали 1</td><td class=n>{p1}</td><td class=n>{(p1/nc*100 if nc else 0):.0f}%</td></tr>
+<tr><td>Обрали 2+</td><td class=n>{p2}</td><td class=n>{(p2/nc*100 if nc else 0):.0f}%</td></tr>"""
+
+    coup_sum = f"""<tr><td>🛍 Modnamama −300</td><td class=n>{mm_all}</td><td class=n>акт. {mm_live}</td></tr>
+<tr><td>🤍 Znana −10%</td><td class=n>{zn_all}</td><td class=n>акт. {zn_live}</td></tr>
+<tr><td>🎟 −150 (натискань)</td><td class=n>{n("select count(*) from gifts where gift='mam150'")}</td><td></td></tr>"""
+    coup_list = "".join(f"<tr><td><code>{c}</code></td><td>{who}</td><td class=n>{exp[:10]}</td><td>{'🟢' if live else '⚪'}{' 🔔' if rem else ''}</td></tr>" for c, who, exp, live, rem in cpn)
+
+    lvl_rows = rows([(nm, lvl_counts.get(nm, 0)) for nm in ["Діамант", "VIP", "Смарт", "Базовий", "—"]], pct_of=len(base) or 1)
+    near_rows = "".join(f"<tr><td>{b[0]}</td><td>{getname(b[0])}</td><td class=n>{b[1]:,.0f} ₴</td><td class=n>{b[5]:,.0f} ₴ до «{b[4]}»</td></tr>".replace(",", " ") for b in near)
+    cust_rows = "".join(f"<tr><td><a href=/client?key={AK}&id={r[0]}>{r[2] if r[2]!='—' else r[0]}</a></td><td>{r[1]}</td><td>{r[8]}</td><td>{STAGE_UA.get(r[3], r[3])}</td><td>{r[4] or '—'}</td><td>{SRC_UA.get(r[7], r[7])}</td><td class=n>{r[5][5:16]}</td><td class=n>{r[6]}</td></tr>" for r in cust)
+
+    cfg_stage = "".join(f"<tr><td>{STAGE_UA.get(st, st)}</td><td>{', '.join(kws)}</td></tr>" for st, kws in STAGE_RULES)
+    cfg_gifts = "".join(f"<tr><td>{STAGE_UA.get(st, st)}</td><td>{' → '.join(g['label'] for g in gs)}</td></tr>" for st, gs in GIFTS.items())
+    cfg_life = "".join(f"<tr><td>{STAGE_UA.get(st, st)}</td><td class=n>+{d}д</td><td>{txt}</td><td>{(u or '—').replace('https://','')}</td></tr>" for st, items in LIFECYCLE.items() for d, k, txt, u in items)
+    cfg_texts = "".join(f"<tr><td><code>{k}</code></td><td>{v.replace(chr(10),'<br>')}</td></tr>" for k, v in T.items())
+
+    def panel(title, inner, wide=False, extra=""):
+        return f'<section class="p{" wide" if wide else ""}"><h2>{title}{extra}</h2>{inner}</section>'
+    def det(title, inner):
+        return f'<details class="p wide"><summary>{title}</summary>{inner}</details>'
+
+    return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Mamulya Bot — кабінет</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💛</text></svg>">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
+<style>
+:root{{--bg:#F7F2F0;--card:#FFF;--line:#EADFDB;--ink:#2B2226;--ink2:#6E5F65;--ink3:#A1939A;--acc:#B8325A;--acc-dim:#F8E4EA}}
+*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--ink);font:13.5px/1.45 "Golos Text",system-ui,sans-serif;padding:20px}}
+.top{{display:flex;align-items:baseline;gap:12px;max-width:1100px;margin:0 auto 14px}}
+h1{{font-size:19px;font-weight:700;margin:0}}.upd{{color:var(--ink3);font-size:12px}}
+.tiles{{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;max-width:1100px;margin:0 auto 14px}}
+.tile{{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px}}
+.tile b{{display:block;font-size:20px;font-variant-numeric:tabular-nums}}.tile span{{font-size:10.5px;color:var(--ink3);text-transform:uppercase;letter-spacing:.04em}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px;max-width:1100px;margin:0 auto}}
+.p{{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;overflow-x:auto}}
+.p.wide{{grid-column:1/-1}}
+h2{{font-size:13px;font-weight:600;margin:0 0 8px;color:var(--ink2)}}
+h2 small{{font-weight:400;color:var(--ink3)}}
+table{{border-collapse:collapse;width:100%;font-size:12.5px}}
+td,th{{padding:4px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}}
+tr:last-child td{{border-bottom:0}}th{{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink3)}}
+td.n{{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}}
+td.b{{width:34%}}td.b i{{display:block;height:6px;background:var(--acc);border-radius:3px;min-width:2px}}
+tr.sub td{{color:var(--ink2);font-size:12px;padding-left:20px}}
+a{{color:var(--acc);text-decoration:none}}a:hover{{text-decoration:underline}}
+code{{font-size:11.5px;background:var(--acc-dim);padding:0 4px;border-radius:4px}}
+details.p summary{{cursor:pointer;font-size:13px;font-weight:600;color:var(--ink2)}}
+details.p[open] summary{{margin-bottom:8px}}
 </style>
-<h1>Mamulya Bot — кабінет</h1>
-<p style=color:#6E5F65>Оновлено {time.strftime("%d.%m %H:%M")} · автооновлення при перезавантаженні сторінки</p>
-<div class=cards>{"".join(f"<div class=card><b>{v}</b><span>{k}</span></div>" for k, v in cards)}</div>
-<h2>Рівні бази (усі {len(base)} клієнтів за сумою покупок) · <a href="/segments.csv?key={os.environ.get("ADMIN_KEY","")}">вивантажити CSV</a></h2>
-<table>{"".join(f"<tr><td>{n or '—'}</td><td class=n>{lvl_counts.get(n,0)}</td></tr>" for n in ["Діамант","VIP","Смарт","Базовий","—"])}</table>
-<h2>«Зовсім трішки» до наступного рівня (≤1000 ₴) — {len(near)} клієнтів</h2>
-<table><tr><th>Телефон</th><th>Імʼя</th><th>Сума</th><th>Рівень</th><th>До наступного</th></tr>
-{"".join(f"<tr><td>{b[0]}</td><td>{getname(b[0])}</td><td class=n>{b[1]:,.0f}".replace(",", " ") + f" ₴</td><td>{b[2]}</td><td class=n>{b[5]:,.0f}".replace(",", " ") + f" ₴ до «{b[4]}»</td></tr>" for b in near)}</table>
-<h2>Клієнти за стадіями</h2><table>{bar(stages, STAGE_UA)}</table>
-<h2>Обрані подарунки <span style="font-weight:400;color:#A1939A;font-size:13px">(% — від {pickers} клієнтів, що обрали хоч один)</span></h2>
-<table>{"".join(f"<tr><td>{GIFT_UA.get(g, g)}</td><td class=n>{c}</td><td class=n>{(c/pickers*100 if pickers else 0):.0f}%</td><td class=b><i style=width:{int(c/max(x[1] for x in gifts)*100) if gifts else 0}%></i></td></tr>" for g, c in gifts)}</table>
-<h2>Купони</h2>
-<table>
-<tr><th>Тип</th><th>Видано</th><th>Активних</th></tr>
-<tr><td>🛍 Modnamama −10%</td><td class=n>{mm_all}</td><td class=n>{mm_live}</td></tr>
-<tr><td>🤍 Znana Mama −10%</td><td class=n>{zn_all}</td><td class=n>{zn_live}</td></tr>
-<tr><td>🎟 Mamulya −150 ₴ (з пулу)</td><td class=n>{n("select count(*) from pool where chat_id is not null")}</td><td class=n>—</td></tr>
-</table>
-<h3 style="margin-top:14px">Останні 50 виданих</h3>
-<table><tr><th>Код</th><th>Кому (телефон/чат)</th><th>Діє до</th><th>Стан</th></tr>
-{"".join(f"<tr><td><code>{c}</code></td><td>{who}</td><td>{exp[:16]}</td><td>{'🟢 активний' if live else '⚪ минув'}{' · нагадано' if rem else ''}</td></tr>" for c, who, exp, live, rem in cpn)}</table>
-<h2>Що налаштовано: стадія ← товар</h2>
-<table><tr><th>Стадія</th><th>Ключові слова в назві товару</th></tr>
-{"".join(f"<tr><td>{STAGE_UA.get(st, st)}</td><td>{', '.join(kws)}</td></tr>" for st, kws in STAGE_RULES)}</table>
-<h2>Що налаштовано: подарунки за стадією (порядок у меню)</h2>
-<table>{"".join(f"<tr><td>{STAGE_UA.get(st, st)}</td><td>{' → '.join(g['label'] for g in gs)}</td></tr>" for st, gs in GIFTS.items())}</table>
-<h2>Усі тексти повідомлень (rules.py → TEXTS)</h2>
-<table><tr><th>Ключ</th><th>Текст</th></tr>
-{"".join(f"<tr><td><code>{k}</code></td><td>{v.replace(chr(10),'<br>')}</td></tr>" for k, v in T.items())}</table>
-<h2>Що налаштовано: автонагадування</h2>
-<table><tr><th>Стадія</th><th>Коли</th><th>Текст</th><th>Посилання</th></tr>
-{"".join(f"<tr><td>{STAGE_UA.get(st, st)}</td><td class=n>+{d} дн</td><td>{txt}</td><td>{(u or '—').replace('https://','')}</td></tr>" for st, items in LIFECYCLE.items() for d, k, txt, u in items)}</table>
-<p style=color:#6E5F65>Плюс службові: нагадування про купон за 5 днів до кінця. Змінюється все у файлі rules.py. Побачити очима клієнта: команда <b>/demo стадія</b> в боті.</p>
-<h2>Останні клієнти (100)</h2>
-<table><tr><th>chat_id</th><th>Телефон</th><th>Імʼя</th><th>Стадія</th><th>Дата нар.</th><th>Зайшов у бот</th><th>Подарунків</th></tr>
-{"".join(f"<tr><td><a href=/client?key={AK}&id={r[0]}>{r[0]}</a></td><td>{r[1]}</td><td>{r[2]}</td><td>{STAGE_UA.get(r[3], r[3])}</td><td>{r[4] or '—'}</td><td>{r[5]}</td><td class=n>{r[6]}</td></tr>" for r in cust)}</table>"""
+<div class=top><h1>💛 Mamulya Bot</h1><span class=upd>оновлено {time.strftime("%d.%m %H:%M")}</span>
+<span class=upd style=margin-left:auto><a href="/segments.csv?key={AK}">CSV сегментів ↓</a></span></div>
+<div class=tiles>{"".join(f"<div class=tile><b>{v}</b><span>{k}</span></div>" for k, v in cards)}</div>
+<div class=grid>
+{panel("Воронка · SMS → бот → подарунки", f"<table>{fun}</table>")}
+{panel("Звідки прийшли в бот", f"<table>{rows(srcs, SRC_UA)}</table>")}
+{panel("Обрані подарунки", f"<table>{rows(gifts, GIFT_UA, pct_of=pickers or 1)}</table>", extra=f" <small>% від {pickers} з подарунками</small>")}
+{panel("Купони", f"<table>{coup_sum}</table>")}
+{panel("Замовлення за магазинами", f"<table>{rows(stores)}</table>")}
+{panel("Клієнти за стадіями", f"<table>{rows(stages, STAGE_UA)}</table>")}
+{panel("Рівні бази", f"<table>{lvl_rows}</table>", extra=f" <small>{len(base)} клієнтів з покупками</small>")}
+{panel("«Трішки до рівня» ≤1000 ₴", f"<table><tr><th>Телефон</th><th>Імʼя</th><th>Сума</th><th>До рівня</th></tr>{near_rows}</table>", extra=f" <small>{len(near)}</small>")}
+{panel("Останні клієнти", f"<table><tr><th>Клієнт</th><th>Телефон</th><th>Магазин</th><th>Стадія</th><th>ДН/ПДР</th><th>Джерело</th><th>Зайшла</th><th>🎁</th></tr>{cust_rows}</table>", wide=True)}
+{det("🎟 Останні видані купони", f"<table><tr><th>Код</th><th>Кому</th><th>До</th><th></th></tr>{coup_list or '<tr><td>поки нема</td></tr>'}</table>")}
+{det("⚙️ Стадія ← товар", f"<table>{cfg_stage}</table>")}
+{det("⚙️ Подарунки за стадією", f"<table>{cfg_gifts}</table>")}
+{det("⚙️ Автонагадування", f"<table><tr><th>Стадія</th><th>Коли</th><th>Текст</th><th>Куди</th></tr>{cfg_life}</table><p style=color:var(--ink3);font-size:12px>Плюс службові: нагадування про купон за 5 днів до кінця. Тексти правляться у rules.py. Демо: /demo стадія в боті.</p>")}
+{det("⚙️ Усі тексти повідомлень", f"<table>{cfg_texts}</table>")}
+</div></html>"""
 
 if __name__ == "__main__":
     threading.Thread(target=poll, daemon=True).start()
