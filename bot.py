@@ -438,6 +438,17 @@ class Hook(BaseHTTPRequestHandler):
                 nm = (DB.execute("select name from names where phone=?", (ph,)).fetchone() or [""])[0]
                 rows.append(f"{ph};{nm};{total:.0f};{lvl};{pc};{nx};{need:.0f}")
             self.wfile.write("\n".join(rows).encode()); return
+        if u.path == "/b2b" and authed:
+            ph = qs.get("phone", [""])[0]
+            if DB.execute("select 1 from b2b where phone=?", (ph,)).fetchone():
+                DB.execute("delete from b2b where phone=?", (ph,))
+                DB.execute("update customers set stage='unknown' where phone=?", (ph,))
+            else:
+                DB.execute("insert or ignore into b2b values(?)", (ph,))
+                DB.execute("update customers set stage='b2b' where phone=?", (ph,))
+            DB.commit()
+            cid = qs.get("id", ["0"])[0]
+            self.send_response(302); self.send_header("Location", f"/client?key={os.environ.get('ADMIN_KEY','')}&id={cid}"); self.end_headers(); return
         if u.path == "/client" and authed:
             cid = int(qs.get("id", ["0"])[0])
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
@@ -496,7 +507,7 @@ td,th{{padding:7px 12px;border-bottom:1px solid #E8DCD8;text-align:left;vertical
 <p><a href="javascript:history.back()">← назад до кабінету</a></p>
 <h1>{name} · {phone or "без телефону"}</h1>
 <table>
-{tr(("Магазин", store or "—"))}{tr(("Стадія", STAGE_UA.get(stage, stage)))}{tr(("Дата народження/ПДР", dob or "—"))}
+{tr(("Магазин", store or "—"))}{tr(("Стадія", STAGE_UA.get(stage, stage) + (f' · <a href="/b2b?key={os.environ.get("ADMIN_KEY","")}&phone={phone}&id={cid}">{"зняти позначку організації" if stage=="b2b" else "позначити як організацію 🏢"}</a>' if phone else "")))}{tr(("Дата народження/ПДР", dob or "—"))}
 {tr(("Останнє замовлення", oid or "—"))}{tr(("Сума покупок", money + " ₴"))}
 {tr(("У боті з", time.strftime("%d.%m.%Y", time.localtime(created))))}
 {tr(("Подарунки", ", ".join(gifts) or "ще не обрано"))}
