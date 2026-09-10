@@ -482,6 +482,12 @@ def client_page(cid):
     total = DB.execute("select coalesce(sum(amount),0) from orders where phone=? and status not in (6,7,13,15,8)", (phone,)).fetchone()[0] if phone else 0
     gifts = [GIFT_UA.get(g, g) for (g,) in DB.execute("select gift from gifts where chat_id=?", (cid,))]
     coup = DB.execute("select code, datetime(expires,'unixepoch','localtime') from coupons where chat_id=?", (cid,)).fetchall()
+    static_map = {"mam150": ("MAM150_CODE", "Mamulya"), "freeship": (None, "FREESHIP · Mamulya"), "antiage": ("ANTIAGE_CODE", "AntiAge")}
+    taken = {g for (g,) in DB.execute("select gift from gifts where chat_id=?", (cid,))}
+    statics = []
+    if "freeship" in taken: statics.append("<code>FREESHIP</code> (безстроковий · Mamulya)")
+    if "mam150" in taken and os.environ.get("MAM150_CODE"): statics.append(f"<code>{os.environ['MAM150_CODE']}</code> (статичний · Mamulya)")
+    if "antiage" in taken and os.environ.get("ANTIAGE_CODE"): statics.append(f"<code>{os.environ['ANTIAGE_CODE']}</code> (статичний · AntiAge)")
     lif_texts = {k: t for st in LIFECYCLE.values() for _, k, t, _ in st}
     sent_rows = DB.execute("select key, ts from sent where chat_id=? order by coalesce(ts,0)", (cid,)).fetchall()
     hist = []
@@ -499,7 +505,7 @@ def client_page(cid):
         plan.append((time.strftime("%d.%m.%Y", time.localtime(created + days * DAY)), txt[:120]))
     tr = lambda cells: "<tr>" + "".join(f"<td>{x}</td>" for x in cells) + "</tr>"
     money = f"{total:,.0f}".replace(",", " ")
-    coup_html = "<br>".join(f"<code>{c}</code> до {e[:10]}" for c, e in coup) or "—"
+    coup_html = "<br>".join([f"<code>{c}</code> до {e[:10]}" for c, e in coup] + statics) or "—"
     return f"""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Клієнт {cid}</title>
 <style>body{{font:14px/1.5 -apple-system,sans-serif;margin:0;background:#FBF7F5;color:#2B2226;padding:24px}}h1{{font-size:20px}}h2{{font-size:15px;margin:22px 0 8px}}
