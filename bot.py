@@ -16,7 +16,8 @@ create table if not exists orders(order_id text primary key, phone text, items t
 create table if not exists customers(chat_id integer primary key, order_id text, phone text, stage text, dob text, created real, picked int default 0);
 create table if not exists gifts(chat_id int, gift text, ts real);
 create table if not exists coupons(code text primary key, chat_id int, expires real, reminded int default 0);
-create table if not exists sent(chat_id int, key text, primary key(chat_id,key));
+create table if not exists sent(chat_id int, key text, ts real, primary key(chat_id,key));
+create table if not exists posts(id integer primary key autoincrement, ts real, target text, text text);
 create table if not exists pool(code text primary key, chat_id int, ts real);
 create table if not exists names(phone text primary key, name text);
 """)
@@ -25,6 +26,8 @@ except Exception: pass
 try: DB.execute("alter table orders add column store text default ''")
 except Exception: pass
 try: DB.execute("alter table customers add column store text default ''")
+except Exception: pass
+try: DB.execute("alter table sent add column ts real")
 except Exception: pass
 DAY = 86400
 
@@ -244,10 +247,15 @@ def on_text(chat_id, text):
         if stage: ids = [r[0] for r in DB.execute("select chat_id from customers where stage=?", (stage,))]
         elif store: ids = [r[0] for r in DB.execute("select chat_id from customers where store=?", (store,))]
         else: ids = [r[0] for r in DB.execute("select chat_id from customers")]
+        cur = DB.execute("insert into posts(ts,target,text) values(?,?,?)", (time.time(), stage or store or "всі", body))
+        pid = cur.lastrowid; DB.commit()
         ok = 0
         for cid in ids:
-            try: send(cid, body); ok += 1
+            try:
+                send(cid, body); ok += 1
+                DB.execute("insert or ignore into sent values(?,?,?)", (cid, f"post:{pid}", time.time()))
             except Exception as e: print("post", e)
+        DB.commit()
         return send(chat_id, f"Надіслано {ok}/{len(ids)}")
     if len(t) == 10 and t[2] == "." and t[5] == ".":
         DB.execute("update customers set dob=? where chat_id=?", (t, chat_id)); DB.commit()
@@ -323,7 +331,7 @@ def cron():
                 if now - created >= days * DAY and not DB.execute("select 1 from sent where chat_id=? and key=?", (chat_id, key)).fetchone():
                     try: send(chat_id, text, [[("Подивитись", url)]] if url else None)
                     except Exception as e: print("send", e)
-                    DB.execute("insert into sent values(?,?)", (chat_id, key))
+                    DB.execute("insert into sent values(?,?,?)", (chat_id, key, now))
         for code, chat_id, exp in DB.execute("select code,chat_id,expires from coupons where reminded=0 and expires-? < ?", (now, 5 * DAY)):
             try: send(chat_id, T["coupon_left"].format(code=code), [[("Modnamama", f"https://modnamama.ua/?c={code}")]])
             except Exception as e: print("remind", e)
@@ -359,6 +367,10 @@ class Hook(BaseHTTPRequestHandler):
                 nm = (DB.execute("select name from names where phone=?", (ph,)).fetchone() or [""])[0]
                 rows.append(f"{ph};{nm};{total:.0f};{lvl};{pc};{nx};{need:.0f}")
             self.wfile.write("\n".join(rows).encode()); return
+        if u.path == "/client" and authed:
+            cid = int(qs.get("id", ["0"])[0])
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
+            self.wfile.write(client_page(cid).encode()); return
         if u.path != "/admin" or not authed:
             self.send_response(200); self.end_headers(); self.wfile.write(b"ok"); return
         self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
@@ -379,7 +391,54 @@ def base_levels():
         out.append((ph, total, cur[2], cur[1], nxt[2] if nxt else "", nxt[0] - total if nxt else 0))
     return out
 
+def client_page(cid):
+    c = DB.execute("select phone,stage,dob,created,coalesce(store,''),order_id from customers where chat_id=?", (cid,)).fetchone()
+    if not c: return "<p>Клієнта не знайдено</p>"
+    phone, stage, dob, created, store, oid = c
+    name = (DB.execute("select name from names where phone=?", (phone,)).fetchone() or ["—"])[0]
+    total = DB.execute("select coalesce(sum(amount),0) from orders where phone=?", (phone,)).fetchone()[0] if phone else 0
+    gifts = [GIFT_UA.get(g, g) for (g,) in DB.execute("select gift from gifts where chat_id=?", (cid,))]
+    coup = DB.execute("select code, datetime(expires,'unixepoch','localtime') from coupons where chat_id=?", (cid,)).fetchall()
+    lif_texts = {k: t for st in LIFECYCLE.values() for _, k, t, _ in st}
+    sent_rows = DB.execute("select key, ts from sent where chat_id=? order by coalesce(ts,0)", (cid,)).fetchall()
+    hist = []
+    for k, ts in sent_rows:
+        when = time.strftime("%d.%m %H:%M", time.localtime(ts)) if ts else "—"
+        if k.startswith("post:"):
+            row = DB.execute("select text from posts where id=?", (k[5:],)).fetchone()
+            hist.append((when, "розсилка", (row[0] if row else "?")[:120]))
+        else:
+            hist.append((when, "автонагадування", lif_texts.get(k, k)[:120]))
+    plan = []
+    done = {k for k, _ in sent_rows}
+    for days, k, txt, url in LIFECYCLE.get(stage, []):
+        if k in done or (k == "p3" and store == "Znana Mama"): continue
+        plan.append((time.strftime("%d.%m.%Y", time.localtime(created + days * DAY)), txt[:120]))
+    tr = lambda cells: "<tr>" + "".join(f"<td>{x}</td>" for x in cells) + "</tr>"
+    money = f"{total:,.0f}".replace(",", " ")
+    coup_html = "<br>".join(f"<code>{c}</code> до {e[:10]}" for c, e in coup) or "—"
+    return f"""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Клієнт {cid}</title>
+<style>body{{font:14px/1.5 -apple-system,sans-serif;margin:0;background:#FBF7F5;color:#2B2226;padding:24px}}h1{{font-size:20px}}h2{{font-size:15px;margin:22px 0 8px}}
+table{{border-collapse:collapse;background:#fff;border:1px solid #E8DCD8;border-radius:10px;width:100%;font-size:13px;max-width:760px}}
+td,th{{padding:7px 12px;border-bottom:1px solid #E8DCD8;text-align:left;vertical-align:top}}a{{color:#B8325A}}</style>
+<p><a href="javascript:history.back()">← назад до кабінету</a></p>
+<h1>{name} · {phone or "без телефону"}</h1>
+<table>
+{tr(("Магазин", store or "—"))}{tr(("Стадія", STAGE_UA.get(stage, stage)))}{tr(("Дата народження/ПДР", dob or "—"))}
+{tr(("Останнє замовлення", oid or "—"))}{tr(("Сума покупок", money + " ₴"))}
+{tr(("У боті з", time.strftime("%d.%m.%Y", time.localtime(created))))}
+{tr(("Подарунки", ", ".join(gifts) or "ще не обрано"))}
+{tr(("Купони", coup_html))}
+</table>
+<h2>📨 Вже отримано ({len(hist)})</h2>
+<table><tr><th>Коли</th><th>Тип</th><th>Повідомлення</th></tr>{"".join(tr(r) for r in hist) or tr(("—","—","поки нічого"))}</table>
+<h2>📅 Заплановано ({len(plan)})</h2>
+<table><tr><th>Дата</th><th>Повідомлення</th></tr>{"".join(tr(r) for r in plan) or tr(("—","для цієї стадії все надіслано"))}</table>
+<p style="color:#A1939A">Плюс службові: нагадування про купон за 5 днів до кінця дії (якщо є активний купон).</p>"""
+
 def admin_page():
+    AK = os.environ.get("ADMIN_KEY", "")
     q = lambda sql, *a: DB.execute(sql, a).fetchall()
     n = lambda sql: q(sql)[0][0]
     now = time.time()
@@ -452,7 +511,7 @@ td.b{{width:40%}}td.b i{{display:block;height:8px;background:#B8325A;border-radi
 <p style=color:#6E5F65>Плюс службові: нагадування про купон за 5 днів до кінця. Змінюється все у файлі rules.py. Побачити очима клієнта: команда <b>/demo стадія</b> в боті.</p>
 <h2>Останні клієнти (100)</h2>
 <table><tr><th>chat_id</th><th>Телефон</th><th>Імʼя</th><th>Стадія</th><th>Дата нар.</th><th>Зайшов у бот</th><th>Подарунків</th></tr>
-{"".join(f"<tr><td>{r[0]}</td><td>{r[1]}</td><td>{r[2]}</td><td>{STAGE_UA.get(r[3], r[3])}</td><td>{r[4] or '—'}</td><td>{r[5]}</td><td class=n>{r[6]}</td></tr>" for r in cust)}</table>"""
+{"".join(f"<tr><td><a href=/client?key={AK}&id={r[0]}>{r[0]}</a></td><td>{r[1]}</td><td>{r[2]}</td><td>{STAGE_UA.get(r[3], r[3])}</td><td>{r[4] or '—'}</td><td>{r[5]}</td><td class=n>{r[6]}</td></tr>" for r in cust)}</table>"""
 
 if __name__ == "__main__":
     threading.Thread(target=poll, daemon=True).start()
