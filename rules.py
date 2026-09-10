@@ -20,10 +20,11 @@ PDF = {}  # ponytail: гайди прибрані за рішенням 23.08 �
 G = lambda i, l: {"id": i, "label": l}
 DILA, COUPON, REF, SHIP = G("dila", "🧪 Dila −20% на аналізи"), G("coupon", "🛍 −10% на все для малюка"), G("referral", "🤝 Подрузі −10%, мені −10%"), G("freeship", "📦 Безкоштовна доставка")
 MAM = G("mam150", "🎟 −150 ₴ на Mamulya")
+ZN = G("znana10", "🤍 −10% на одяг для мам Znana")
 
 GIFTS = {
-    "pregnant": [DILA, COUPON, MAM, SHIP, REF],
-    "m0_3":     [DILA, COUPON, MAM, SHIP, REF],
+    "pregnant": [DILA, COUPON, ZN, MAM, SHIP, REF],
+    "m0_3":     [DILA, COUPON, ZN, MAM, SHIP, REF],
     "m3_6":     [COUPON, MAM, DILA, SHIP, REF],
     "m6_12":    [COUPON, MAM, SHIP, REF, DILA],
     "lipoland": [MAM, DILA, COUPON, SHIP, REF],
@@ -65,6 +66,7 @@ TEXTS = {
  "gift_dila":     "🧪 <b>−20% на аналізи в МЛ Діла</b> для клієнтів Mamulya. Код: <code>{code}</code>\n\nЯк скористатись (будь-який варіант):\n1️⃣ У відділенні — покажіть цей QR і перелік досліджень.\n2️⃣ Call-центр 0 800 217 887 — назвіть код і дослідження; оплата онлайн за посиланням з SMS або у відділенні.\n3️⃣ Передзамовлення в особистому кабінеті Діла → оберіть оплату у відділенні (не онлайн) → покажіть QR касиру.\n\nЗнижка не сумується з іншими. Труднощі з QR — Вікторія, 067 700 13 72.",
  "gift_coupon":   "🛍 <b>−10% на все для малюка</b> в Modnamama — це наш другий, великий магазин: коляски, стільчики, ванночки, іграшки, одяг — у 20 разів більший вибір, ніж на Mamulya.\n\nКод: <code>{code}</code> — застосується сам, просто перейдіть за кнопкою. Діє до {date}.",
  "gift_mam150":   "🎟 <b>−150 ₴</b> на наступне замовлення в Mamulya від 1 500 ₴.\nКод: <code>{code}</code>, діє 30 днів.",
+ "gift_znana":    "🤍 <b>−10% на одяг для вагітних і годуючих Znana Mama</b> — наш власний бренд: топи, сорочки, халати, білизна.\nКод: <code>{code}</code> — введіть у кошику на znanamama.com.ua. Діє до {date}, одноразовий.",
  "gift_mam150_empty": "Коди тимчасово закінчились — менеджер надішле вручну 🙏",
  "gift_freeship": "📦 Безкоштовна доставка на наступне замовлення в Mamulya.\nКод: <code>FREESHIP</code> — введіть у полі «Маєш код на знижку?».",
  "gift_referral": "🤝 Подрузі −10%, вам −10% після її замовлення.\nВаше посилання:\nhttps://t.me/{bot}?start=ref{chat_id}",
@@ -82,6 +84,6 @@ if __name__ == "__main__":
     assert infer_stage(["Ортопедична подушка для грудного вигодовування Feeding Pillow"]) == "pregnant"
     assert infer_stage(["Ерго-рюкзак Adapted Капучино DiSling 1 розмір"]) == "m3_6"
     assert infer_stage([]) == "unknown"
-    assert all(len(v) == 5 for v in GIFTS.values())
-    assert all(g["id"] in ("dila","coupon","mam150","freeship","referral") for v in GIFTS.values() for g in v)
+    assert all(5 <= len(v) <= 6 for v in GIFTS.values())
+    assert all(g["id"] in ("dila","coupon","mam150","freeship","referral","znana10") for v in GIFTS.values() for g in v)
     print("ok")

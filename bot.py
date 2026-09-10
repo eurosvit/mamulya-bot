@@ -115,6 +115,18 @@ def give(chat_id, gift):
         code, exp = create_coupon(chat_id)
         send(chat_id, T["gift_coupon"].format(code=code, date=time.strftime("%d.%m", time.localtime(exp))),
              [[("Обрати на Modnamama", f"https://modnamama.ua/?c={code}")]])
+    elif gift == "znana10":
+        body = json.dumps({"prefix": "ZNBOT", "percent": 10, "uses": 1, "days": 30}).encode()
+        req = urllib.request.Request("https://znana-stock.onrender.com/api/promos/issue", body,
+                                     {"Content-Type": "application/json", "x-secret": os.environ.get("ZNANA_SECRET", "")})
+        try:
+            r = json.load(urllib.request.urlopen(req, timeout=20))
+            code = r["code"]; exp = time.time() + 30 * DAY
+            DB.execute("insert into coupons values(?,?,?,0)", (code, chat_id, exp)); DB.commit()
+            send(chat_id, T["gift_znana"].format(code=code, date=time.strftime("%d.%m", time.localtime(exp))),
+                 [[("На Znana Mama", "https://znanamama.com.ua/khity")]])
+        except Exception as e:
+            print("znana", e); send(chat_id, "Не вдалось видати код 🙏 Напишіть менеджеру — видасть вручну."); return
     elif gift == "freeship":
         send(chat_id, T["gift_freeship"])
     elif gift == "referral":
@@ -144,6 +156,8 @@ def show_menu(chat_id, stage):
             send(chat_id, T["ask_dob"])
         return
     options = [g for g in gifts_for(stage) if not DB.execute("select 1 from gifts where chat_id=? and gift=?", (chat_id, g["id"])).fetchone()]
+    if not os.environ.get("ZNANA_SECRET"):
+        options = [g for g in options if g["id"] != "znana10"]  # ponytail: без секрета кнопку не показуємо
     send(chat_id, T["menu_header"].format(left=2 - picked), [[(g["label"], "gift:" + g["id"])] for g in options])
 
 # ---------- handlers ----------
@@ -377,6 +391,9 @@ def admin_page():
     getname = lambda ph: (DB.execute("select name from names where phone=?", (ph,)).fetchone() or ["—"])[0]
     gifts = q("select gift,count(*) from gifts group by gift order by 2 desc")
     cust = q("select c.chat_id, coalesce(nullif(c.phone,''),'—'), coalesce((select name from names n where n.phone=c.phone),'—'), c.stage, c.dob, datetime(c.created,'unixepoch','localtime'), (select count(*) from gifts g where g.chat_id=c.chat_id) from customers c order by c.created desc limit 100")
+    cptype = lambda pfx: (n(f"select count(*) from coupons where code like '{pfx}%'"), n(f"select count(*) from coupons where code like '{pfx}%' and expires>{now}"))
+    mm_all, mm_live = cptype("MAM"); zn_all, zn_live = cptype("ZNBOT")
+    cpn = q("select c.code, coalesce(nullif(cu.phone,''),c.chat_id), datetime(c.expires,'unixepoch','localtime'), c.expires>? , c.reminded from coupons c left join customers cu on cu.chat_id=c.chat_id order by c.expires desc limit 50", now)
     cards = [("Клієнтів у боті", n("select count(*) from customers")),
              ("З підтвердженим номером", n("select count(*) from customers where phone!=''")),
              ("Замовлень у базі", n("select count(*) from orders")),
@@ -406,6 +423,16 @@ td.b{{width:40%}}td.b i{{display:block;height:8px;background:#B8325A;border-radi
 {"".join(f"<tr><td>{b[0]}</td><td>{getname(b[0])}</td><td class=n>{b[1]:,.0f}".replace(",", " ") + f" ₴</td><td>{b[2]}</td><td class=n>{b[5]:,.0f}".replace(",", " ") + f" ₴ до «{b[4]}»</td></tr>" for b in near)}</table>
 <h2>Клієнти за стадіями</h2><table>{bar(stages, STAGE_UA)}</table>
 <h2>Обрані подарунки</h2><table>{bar(gifts, GIFT_UA)}</table>
+<h2>Купони</h2>
+<table>
+<tr><th>Тип</th><th>Видано</th><th>Активних</th></tr>
+<tr><td>🛍 Modnamama −10%</td><td class=n>{mm_all}</td><td class=n>{mm_live}</td></tr>
+<tr><td>🤍 Znana Mama −10%</td><td class=n>{zn_all}</td><td class=n>{zn_live}</td></tr>
+<tr><td>🎟 Mamulya −150 ₴ (з пулу)</td><td class=n>{n("select count(*) from pool where chat_id is not null")}</td><td class=n>—</td></tr>
+</table>
+<h3 style="margin-top:14px">Останні 50 виданих</h3>
+<table><tr><th>Код</th><th>Кому (телефон/чат)</th><th>Діє до</th><th>Стан</th></tr>
+{"".join(f"<tr><td><code>{c}</code></td><td>{who}</td><td>{exp[:16]}</td><td>{'🟢 активний' if live else '⚪ минув'}{' · нагадано' if rem else ''}</td></tr>" for c, who, exp, live, rem in cpn)}</table>
 <h2>Що налаштовано: стадія ← товар</h2>
 <table><tr><th>Стадія</th><th>Ключові слова в назві товару</th></tr>
 {"".join(f"<tr><td>{STAGE_UA.get(st, st)}</td><td>{', '.join(kws)}</td></tr>" for st, kws in STAGE_RULES)}</table>
