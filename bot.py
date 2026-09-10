@@ -134,13 +134,12 @@ def give(chat_id, gift):
     elif gift == "referral":
         send(chat_id, T["gift_referral"].format(bot=BOT_NAME, chat_id=chat_id))
     elif gift == "mam150":
-        # ponytail: Image CMS без API — пул кодів створюється руками в адмінці, бот роздає по одному
-        row = DB.execute("select code from pool where chat_id is null limit 1").fetchone()
-        if not row:
+        # ponytail: Image CMS без API — один статичний код у env; персональні коди, якщо колись зʼявиться API
+        code = os.environ.get("MAM150_CODE", "")
+        if not code:
             DB.execute("delete from gifts where chat_id=? and gift=?", (chat_id, gift)); DB.commit()
             return send(chat_id, T["gift_mam150_empty"])
-        DB.execute("update pool set chat_id=?, ts=? where code=?", (chat_id, time.time(), row[0])); DB.commit()
-        send(chat_id, T["gift_mam150"].format(code=row[0]), [[("На Mamulya", "https://mamulya.lviv.ua")]])
+        send(chat_id, T["gift_mam150"].format(code=code), [[("На Mamulya", "https://mamulya.lviv.ua")]])
 
 def send_support(chat_id):
     tg("sendMessage", chat_id=chat_id, parse_mode="HTML",
@@ -162,8 +161,8 @@ def show_menu(chat_id, stage):
     options = [g for g in gifts_for(stage) if not DB.execute("select 1 from gifts where chat_id=? and gift=?", (chat_id, g["id"])).fetchone()]
     if not os.environ.get("ZNANA_SECRET"):
         options = [g for g in options if g["id"] != "znana10"]  # ponytail: без секрета кнопку не показуємо
-    if not DB.execute("select 1 from pool where chat_id is null limit 1").fetchone():
-        options = [g for g in options if g["id"] != "mam150"]  # порожній пул — кнопку ховаємо
+    if not os.environ.get("MAM150_CODE"):
+        options = [g for g in options if g["id"] != "mam150"]  # код не заданий — кнопку ховаємо
     send(chat_id, T["menu_header"].format(left=2 - picked), [[(g["label"], "gift:" + g["id"])] for g in options])
 
 # ---------- handlers ----------
@@ -405,7 +404,7 @@ def admin_page():
              ("Замовлень у базі", n("select count(*) from orders")),
              ("Подарунків видано", n("select count(*) from gifts")),
              ("Активних купонів", n(f"select count(*) from coupons where expires>{now}")),
-             ("Вільних кодів −150", n("select count(*) from pool where chat_id is null")),
+             ("Видано −150 (натискань)", n("select count(*) from gifts where gift='mam150'")),
              ("Нагадувань надіслано", n("select count(*) from sent"))]
     return f"""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Mamulya Bot — кабінет</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💛</text></svg>"><style>
