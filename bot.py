@@ -4,7 +4,7 @@ ENV: BOT_TOKEN, SALESDRIVE_KEY, MEDUSA_URL, MEDUSA_KEY, DILA_CODE, BOT_NAME, POR
 import json, os, sqlite3, threading, time, urllib.request, urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from rules import infer_stage, gifts_for, LIFECYCLE, STAGE_RULES, GIFTS, TEXTS as T
+from rules import infer_stage, gifts_for, LIFECYCLE, STAGE_RULES, GIFTS, TEXTS as T, STAGE_PITCH
 
 TOKEN = os.environ["BOT_TOKEN"]
 API = f"https://api.telegram.org/bot{TOKEN}/"
@@ -241,8 +241,8 @@ def on_text(chat_id, text):
     if t == "🛍 Добірка для малюка":
         row = DB.execute("select stage from customers where chat_id=?", (chat_id,)).fetchone()
         st = row[0] if row and row[0] in LIFECYCLE else "unknown"
-        url = (LIFECYCLE[st][0][3] if LIFECYCLE.get(st) else None) or "https://modnamama.ua"
-        return send(chat_id, T["stage_link"], [[("Відкрити", url)]])
+        url = next((u for _, k, _, u in LIFECYCLE.get(st, []) if u and "modnamama" in u), "https://modnamama.ua")
+        return send(chat_id, STAGE_PITCH.get(st, T["stage_link"]) + "\n\nЗібрали все в одному місці 👇", [[("Відкрити добірку", url)]])
     if t == "💬 Менеджер":
         return send_support(chat_id)
     if chat_id in ADMINS and t.startswith("/demo"):
