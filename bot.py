@@ -543,6 +543,14 @@ def admin_page():
         mx = max([r[1] for r in rows], default=1) or 1
         return "".join(f"<tr><td>{names.get(r[0], r[0])}</td><td class=n>{r[1]}</td>"
                        f"<td class=b><i style=width:{int(r[1]/mx*100)}%></i></td></tr>" for r in rows)
+    LAUNCH = 1789045200  # 10.09.2026 — старт SMS з посиланням на бота
+    orders_since = n(f"select count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8)")
+    entered = n(f"select count(*) from customers where created>={LAUNCH}")
+    conv = f"{entered/orders_since*100:.0f}%" if orders_since else "—"
+    nc = n("select count(*) from customers")
+    picks = {r[0]: r[1] for r in q("select cnt, count(*) from (select c.chat_id, (select count(*) from gifts g where g.chat_id=c.chat_id) cnt from customers c) group by cnt")}
+    p0 = picks.get(0, 0); p1 = picks.get(1, 0); p2 = sum(v for k, v in picks.items() if k >= 2)
+    pickers = nc - p0
     stages = q("select stage,count(*) from customers group by stage order by 2 desc")
     stores = q("select coalesce(nullif(store,''),'інше/маркетплейси'), count(*) from orders group by 1 order by 2 desc")
     srcs = q("select coalesce(nullif(src,''),'—'), count(*) from customers group by 1 order by 2 desc")
@@ -584,7 +592,8 @@ td.b{{width:40%}}td.b i{{display:block;height:8px;background:#B8325A;border-radi
 <table><tr><th>Телефон</th><th>Імʼя</th><th>Сума</th><th>Рівень</th><th>До наступного</th></tr>
 {"".join(f"<tr><td>{b[0]}</td><td>{getname(b[0])}</td><td class=n>{b[1]:,.0f}".replace(",", " ") + f" ₴</td><td>{b[2]}</td><td class=n>{b[5]:,.0f}".replace(",", " ") + f" ₴ до «{b[4]}»</td></tr>" for b in near)}</table>
 <h2>Клієнти за стадіями</h2><table>{bar(stages, STAGE_UA)}</table>
-<h2>Обрані подарунки</h2><table>{bar(gifts, GIFT_UA)}</table>
+<h2>Обрані подарунки <span style="font-weight:400;color:#A1939A;font-size:13px">(% — від {pickers} клієнтів, що обрали хоч один)</span></h2>
+<table>{"".join(f"<tr><td>{GIFT_UA.get(g, g)}</td><td class=n>{c}</td><td class=n>{(c/pickers*100 if pickers else 0):.0f}%</td><td class=b><i style=width:{int(c/max(x[1] for x in gifts)*100) if gifts else 0}%></i></td></tr>" for g, c in gifts)}</table>
 <h2>Купони</h2>
 <table>
 <tr><th>Тип</th><th>Видано</th><th>Активних</th></tr>
