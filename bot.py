@@ -551,6 +551,12 @@ def admin_page():
     picks = {r[0]: r[1] for r in q("select cnt, count(*) from (select c.chat_id, (select count(*) from gifts g where g.chat_id=c.chat_id) cnt from customers c) group by cnt")}
     p0 = picks.get(0, 0); p1 = picks.get(1, 0); p2 = sum(v for k, v in picks.items() if k >= 2)
     pickers = nc - p0
+    by_store_orders = dict(q(f"select coalesce(nullif(store,''),'інше'), count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8) group by 1"))
+    by_store_entered = dict(q(f"select coalesce(nullif(store,''),'інше'), count(*) from customers where created>={LAUNCH} group by 1"))
+    store_rows = ""
+    for st in sorted(set(by_store_orders) | set(by_store_entered), key=lambda x: -by_store_orders.get(x, 0)):
+        o, e = by_store_orders.get(st, 0), by_store_entered.get(st, 0)
+        store_rows += f"<tr><td style=padding-left:28px>· {st}</td><td class=n>{o}</td><td>у бот: {e} · конверсія {(e/o*100):.0f}%</td></tr>" if o else f"<tr><td style=padding-left:28px>· {st}</td><td class=n>0</td><td>у бот: {e}</td></tr>"
     stages = q("select stage,count(*) from customers group by stage order by 2 desc")
     stores = q("select coalesce(nullif(store,''),'інше/маркетплейси'), count(*) from orders group by 1 order by 2 desc")
     srcs = q("select coalesce(nullif(src,''),'—'), count(*) from customers group by 1 order by 2 desc")
