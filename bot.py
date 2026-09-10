@@ -278,7 +278,9 @@ def on_callback(cb):
     chat_id, data = cb["message"]["chat"]["id"], cb["data"]
     tg("answerCallbackQuery", callback_query_id=cb["id"])
     if data == "faq":
-        return send(chat_id, T["faq"])
+        row = DB.execute("select coalesce(store,'') from customers where chat_id=?", (chat_id,)).fetchone()
+        store = row[0] if row else ""
+        return send(chat_id, T.get(f"faq_{store}", T["faq"]))
     if data.startswith("gift:"):
         give(chat_id, data[5:])
         stage = DB.execute("select stage from customers where chat_id=?", (chat_id,)).fetchone()[0]
