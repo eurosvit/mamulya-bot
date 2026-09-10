@@ -22,6 +22,8 @@ create table if not exists names(phone text primary key, name text);
 """)
 try: DB.execute("alter table orders add column amount real default 0")
 except Exception: pass
+try: DB.execute("alter table orders add column store text default ''")
+except Exception: pass
 DAY = 86400
 
 # ---------- helpers ----------
@@ -88,6 +90,8 @@ def fetch_order(order_id):
         except Exception as e: print("salesdrive", e)
     return None, []
 
+STORES = {94: "Mamulya", 97: "Mamulya", 134: "Mamulya", 120: "Modnamama", 150: "Modnamama", 157: "Modnamama", 164: "Znana Mama"}
+
 def save_order(o, names=None):
     c0 = (o.get("contacts") or [{}])[0] if isinstance(o.get("contacts"), list) else {}
     phone = norm_phone((c0.get("phone") or [""])[0] if c0 else o.get("phone", ""))
@@ -95,7 +99,8 @@ def save_order(o, names=None):
     if phone and full: DB.execute("insert or replace into names values(?,?)", (phone, full))
     names = names or {}
     items = [p.get("name") or names.get(p.get("productId"), "") for p in o.get("products", [])]
-    DB.execute("insert or replace into orders values(?,?,?,?,?)", (str(o.get("id")), phone, json.dumps(items, ensure_ascii=False), time.time(), float(o.get("paymentAmount") or 0))); DB.commit()
+    store = STORES.get(o.get("sajt"), "")
+    DB.execute("insert or replace into orders values(?,?,?,?,?,?)", (str(o.get("id")), phone, json.dumps(items, ensure_ascii=False), time.time(), float(o.get("paymentAmount") or 0), store)); DB.commit()
     return phone, items
 
 # ---------- gifts ----------
@@ -355,6 +360,7 @@ def admin_page():
         return "".join(f"<tr><td>{names.get(r[0], r[0])}</td><td class=n>{r[1]}</td>"
                        f"<td class=b><i style=width:{int(r[1]/mx*100)}%></i></td></tr>" for r in rows)
     stages = q("select stage,count(*) from customers group by stage order by 2 desc")
+    stores = q("select coalesce(nullif(store,''),'інше/маркетплейси'), count(*) from orders group by 1 order by 2 desc")
     base = base_levels()
     lvl_counts = {}
     for _, _, name, *_ in base: lvl_counts[name] = lvl_counts.get(name, 0) + 1
