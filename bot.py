@@ -31,6 +31,8 @@ try: DB.execute("alter table sent add column ts real")
 except Exception: pass
 try: DB.execute("alter table customers add column bonus int default 0")
 except Exception: pass
+try: DB.execute("alter table orders add column status int default 0")
+except Exception: pass
 DAY = 86400
 
 # ---------- helpers ----------
@@ -99,6 +101,7 @@ def fetch_order(order_id):
     return None, [], ""
 
 STORES = {94: "Mamulya", 97: "Mamulya", 134: "Mamulya", 120: "Modnamama", 150: "Modnamama", 157: "Modnamama", 164: "Znana Mama"}
+BAD_STATUS = "(6,7,13,15,8)"  # DECLINED, Повернення, Скасований, TEST, Видалений — не рахуємо в накопичення
 
 def save_order(o, names=None):
     c0 = (o.get("contacts") or [{}])[0] if isinstance(o.get("contacts"), list) else {}
@@ -108,7 +111,7 @@ def save_order(o, names=None):
     names = names or {}
     items = [p.get("name") or names.get(p.get("productId"), "") for p in o.get("products", [])]
     store = STORES.get(o.get("sajt"), "")
-    DB.execute("insert or replace into orders values(?,?,?,?,?,?)", (str(o.get("id")), phone, json.dumps(items, ensure_ascii=False), time.time(), float(o.get("paymentAmount") or 0), store)); DB.commit()
+    DB.execute("insert or replace into orders values(?,?,?,?,?,?,?)", (str(o.get("id")), phone, json.dumps(items, ensure_ascii=False), time.time(), float(o.get("paymentAmount") or 0), store, int(o.get("statusId") or 0))); DB.commit()
     return phone, items
 
 # ---------- gifts ----------
@@ -195,7 +198,7 @@ def on_start(chat_id, arg):
         DB.execute("update customers set order_id=?, phone=?, stage=?, created=?, store=?, bonus=? where chat_id=?",
                    (arg, phone, stage, time.time(), store, old[1] + 1, chat_id))
         DB.execute("delete from gifts where chat_id=? and gift in ('coupon','znana10')", (chat_id,)); DB.commit()
-        total = DB.execute("select coalesce(sum(amount),0) from orders where phone=?", (phone,)).fetchone()[0]
+        total = DB.execute("select coalesce(sum(amount),0) from orders where phone=? and status not in (6,7,13,15,8)", (phone,)).fetchone()[0]
         cur, nxt = level_of(total)
         lvl = f"рівень {cur[2]}, ваша постійна знижка {cur[1]}%" if cur else (f"до знижки {nxt[1]}% лишилось {nxt[0]-total:,.0f} ₴".replace(",", " ") if nxt else "")
         send(chat_id, T["welcome_repeat"].format(store=store or "нашому магазині", total=f"{total:,.0f}".replace(",", " "), lvl=lvl))
@@ -220,7 +223,7 @@ def on_text(chat_id, text):
         row = DB.execute("select phone from customers where chat_id=?", (chat_id,)).fetchone()
         if not row or not row[0]: return send(chat_id, "Спершу підтвердіть номер телефону: /start")
         # ponytail: сума всіх замовлень без фільтра статусу — скасовані завищать; уточнимо, коли зберігатимемо статус
-        total = DB.execute("select coalesce(sum(amount),0) from orders where phone=?", (row[0],)).fetchone()[0]
+        total = DB.execute("select coalesce(sum(amount),0) from orders where phone=? and status not in (6,7,13,15,8)", (row[0],)).fetchone()[0]
         cur, nxt = level_of(total)
         msg = f"💎 Ваші покупки в Mamulya + Modnamama: <b>{total:,.0f} ₴</b>\n".replace(",", " ")
         msg += f"Рівень: <b>{cur[2]}</b> — постійна знижка {cur[1]}%\n" if cur else "Рівень: на старті програми 🚀\n"
@@ -403,7 +406,7 @@ GIFT_UA = {"dila": "Dila −20%", "coupon": "−10% Modnamama", "mam150": "−15
 LVL = [(25000, 10, "Діамант"), (15000, 7, "VIP"), (9000, 5, "Смарт"), (4500, 3, "Базовий")]
 
 def base_levels():
-    rows = DB.execute("select phone, sum(amount) s from orders where phone!='' group by phone").fetchall()
+    rows = DB.execute("select phone, sum(amount) s from orders where phone!='' and status not in (6,7,13,15,8) group by phone").fetchall()
     out = []
     for ph, total in rows:
         cur = next(((t, p, n) for t, p, n in LVL if total >= t), (0, 0, "—"))
@@ -416,7 +419,7 @@ def client_page(cid):
     if not c: return "<p>Клієнта не знайдено</p>"
     phone, stage, dob, created, store, oid = c
     name = (DB.execute("select name from names where phone=?", (phone,)).fetchone() or ["—"])[0]
-    total = DB.execute("select coalesce(sum(amount),0) from orders where phone=?", (phone,)).fetchone()[0] if phone else 0
+    total = DB.execute("select coalesce(sum(amount),0) from orders where phone=? and status not in (6,7,13,15,8)", (phone,)).fetchone()[0] if phone else 0
     gifts = [GIFT_UA.get(g, g) for (g,) in DB.execute("select gift from gifts where chat_id=?", (cid,))]
     coup = DB.execute("select code, datetime(expires,'unixepoch','localtime') from coupons where chat_id=?", (cid,)).fetchall()
     lif_texts = {k: t for st in LIFECYCLE.values() for _, k, t, _ in st}
