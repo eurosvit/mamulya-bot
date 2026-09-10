@@ -278,6 +278,9 @@ def on_text(chat_id, text):
             except Exception as e: print("post", e)
         DB.commit()
         return send(chat_id, f"Надіслано {ok}/{len(ids)}")
+    digits = "".join(c for c in t if c.isdigit())
+    if len(digits) >= 10 and len(digits) <= 13 and not ("." in t or "," in t):
+        return on_contact(chat_id, digits)
     if len(t) == 10 and t[2] == "." and t[5] == ".":
         DB.execute("update customers set dob=? where chat_id=?", (t, chat_id)); DB.commit()
         return send(chat_id, T["dob_saved"])
