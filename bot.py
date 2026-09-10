@@ -71,17 +71,11 @@ def norm_phone(p):
     d = "".join(c for c in str(p) if c.isdigit())
     return "380" + d[-9:] if len(d) >= 9 else d
 
-def create_coupon(chat_id, pct=10, days=30):
-    code = f"MAM{chat_id % 100000:05d}{int(time.time()) % 1000:03d}"
-    exp = time.time() + days * DAY
-    # ponytail: Medusa Admin API — POST /admin/promotions; без MEDUSA_URL просто пишемо код локально
-    if os.environ.get("MEDUSA_URL"):
-        body = {"code": code, "type": "standard", "application_method": {"type": "percentage", "value": pct, "target_type": "order"},
-                "campaign": {"name": code, "campaign_identifier": code, "ends_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(exp))}}
-        req = urllib.request.Request(os.environ["MEDUSA_URL"] + "/admin/promotions", json.dumps(body).encode(),
-                                     {"Content-Type": "application/json", "x-medusa-access-token": os.environ.get("MEDUSA_KEY", "")})
-        try: urllib.request.urlopen(req, timeout=20)
-        except Exception as e: print("medusa", e)
+def create_coupon(chat_id):
+    req = urllib.request.Request("https://api.modnamama.ua/api/promos/issue", b"{}",
+                                 {"Content-Type": "application/json", "x-secret": os.environ.get("MM_SECRET", "")})
+    r = json.load(urllib.request.urlopen(req, timeout=20))
+    code = r["code"]; exp = time.time() + 30 * DAY
     DB.execute("insert into coupons values(?,?,?,0)", (code, chat_id, exp)); DB.commit()
     return code, exp
 
@@ -121,12 +115,17 @@ def save_order(o, names=None):
 # ---------- gifts ----------
 def give(chat_id, gift):
     DB.execute("insert into gifts values(?,?,?)", (chat_id, gift, time.time())); DB.commit()
+    if gift == "coupon":
+        try:
+            code, exp = create_coupon(chat_id)
+        except Exception as e:
+            print("mm", e)
+            DB.execute("delete from gifts where chat_id=? and gift=?", (chat_id, gift)); DB.commit()
+            return send(chat_id, "Не вдалось видати код 🙏 Спробуйте інший подарунок або напишіть менеджеру.")
+        return send(chat_id, T["gift_coupon"].format(code=code, date=time.strftime("%d.%m", time.localtime(exp))),
+                    [[("Обрати на Modnamama", f"https://modnamama.ua/?c={code}")]])
     if gift == "dila":
         send_photo(chat_id, "assets/dila_qr.png", T["gift_dila"].format(code=DILA_CODE))
-    elif gift == "coupon":
-        code, exp = create_coupon(chat_id)
-        send(chat_id, T["gift_coupon"].format(code=code, date=time.strftime("%d.%m", time.localtime(exp))),
-             [[("Обрати на Modnamama", f"https://modnamama.ua/?c={code}")]])
     elif gift == "znana10":
         body = json.dumps({"prefix": "ZNBOT", "percent": 10, "uses": 1, "days": 30}).encode()
         req = urllib.request.Request("https://znana-stock.onrender.com/api/promos/issue", body,
@@ -184,6 +183,8 @@ def show_menu(chat_id, stage):
             send(chat_id, T["ask_dob"])
         return
     options = [g for g in gifts_for(stage) if not DB.execute("select 1 from gifts where chat_id=? and gift=?", (chat_id, g["id"])).fetchone()]
+    if not os.environ.get("MM_SECRET"):
+        options = [g for g in options if g["id"] != "coupon"]
     if not os.environ.get("ZNANA_SECRET"):
         options = [g for g in options if g["id"] != "znana10"]  # ponytail: без секрета кнопку не показуємо
     if not os.environ.get("MAM150_CODE"):
