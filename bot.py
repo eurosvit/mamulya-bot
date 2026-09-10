@@ -298,8 +298,9 @@ def sync_orders(pages, limit=50):
 def cron():
     while True:
         now = time.time()
-        for chat_id, stage, created in DB.execute("select chat_id,stage,created from customers where picked>=0"):
+        for chat_id, stage, created, store in DB.execute("select chat_id,stage,created,coalesce(store,'') from customers where picked>=0"):
             for days, key, text, url in LIFECYCLE.get(stage, []):
+                if key == "p3" and store == "Znana Mama": continue  # ponytail: не рекламуємо Znana її ж покупцям
                 if now - created >= days * DAY and not DB.execute("select 1 from sent where chat_id=? and key=?", (chat_id, key)).fetchone():
                     try: send(chat_id, text, [[("Подивитись", url)]] if url else None)
                     except Exception as e: print("send", e)
