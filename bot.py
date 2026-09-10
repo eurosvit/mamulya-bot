@@ -155,6 +155,12 @@ def send_support(chat_id):
            [{"text": "💚 WhatsApp", "url": "https://wa.me/380636324010"}],
            [{"text": "❓ Часті питання", "callback_data": "faq"}]]})
 
+def level_of(total):
+    lvls = [(25000, 10, "Діамант 💎"), (15000, 7, "VIP 👑"), (9000, 5, "Смарт 🧠"), (4500, 3, "Базовий 💙")]
+    cur = next(((t, p, n) for t, p, n in lvls if total >= t), None)
+    nxt = ([l for l in reversed(lvls) if total < l[0]] or [None])[0]
+    return cur, nxt
+
 def show_menu(chat_id, stage):
     picked = DB.execute("select count(*) from gifts where chat_id=?", (chat_id,)).fetchone()[0]
     limit = 2 + (DB.execute("select coalesce(bonus,0) from customers where chat_id=?", (chat_id,)).fetchone() or [0])[0]
@@ -190,7 +196,9 @@ def on_start(chat_id, arg):
                    (arg, phone, stage, time.time(), store, old[1] + 1, chat_id))
         DB.execute("delete from gifts where chat_id=? and gift in ('coupon','znana10')", (chat_id,)); DB.commit()
         total = DB.execute("select coalesce(sum(amount),0) from orders where phone=?", (phone,)).fetchone()[0]
-        send(chat_id, T["welcome_repeat"].format(store=store or "нашому магазині", total=f"{total:,.0f}".replace(",", " ")))
+        cur, nxt = level_of(total)
+        lvl = f"рівень {cur[2]}, ваша постійна знижка {cur[1]}%" if cur else (f"до знижки {nxt[1]}% лишилось {nxt[0]-total:,.0f} ₴".replace(",", " ") if nxt else "")
+        send(chat_id, T["welcome_repeat"].format(store=store or "нашому магазині", total=f"{total:,.0f}".replace(",", " "), lvl=lvl))
         return show_menu(chat_id, stage)
     DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created,store) values(?,?,?,?,?,?)", (chat_id, arg, phone, stage, time.time(), store)); DB.commit()
     send(chat_id, T["welcome_store"].format(store=store) if store else T["welcome"])
@@ -213,9 +221,7 @@ def on_text(chat_id, text):
         if not row or not row[0]: return send(chat_id, "Спершу підтвердіть номер телефону: /start")
         # ponytail: сума всіх замовлень без фільтра статусу — скасовані завищать; уточнимо, коли зберігатимемо статус
         total = DB.execute("select coalesce(sum(amount),0) from orders where phone=?", (row[0],)).fetchone()[0]
-        lvls = [(25000, 10, "Діамант 💎"), (15000, 7, "VIP 👑"), (9000, 5, "Смарт 🧠"), (4500, 3, "Базовий 💙")]
-        cur = next(((th, pc, nm) for th, pc, nm in lvls if total >= th), None)
-        nxt = ([l for l in reversed(lvls) if total < l[0]] or [None])[0]
+        cur, nxt = level_of(total)
         msg = f"💎 Ваші покупки в Mamulya + Modnamama: <b>{total:,.0f} ₴</b>\n".replace(",", " ")
         msg += f"Рівень: <b>{cur[2]}</b> — постійна знижка {cur[1]}%\n" if cur else "Рівень: на старті програми 🚀\n"
         if nxt: msg += f"До рівня «{nxt[2]}» ({nxt[1]}%) лишилось {nxt[0]-total:,.0f} ₴".replace(",", " ")
