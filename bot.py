@@ -405,7 +405,9 @@ def cron():
                     except Exception as e: print("send", e)
                     DB.execute("insert into sent values(?,?,?)", (chat_id, key, now))
         for code, chat_id, exp in DB.execute("select code,chat_id,expires from coupons where reminded=0 and expires-? < ?", (now, 5 * DAY)):
-            try: send(chat_id, T["coupon_left"].format(code=code), [[("Modnamama", f"https://modnamama.ua/?c={code}")]])
+            try:
+                send(chat_id, T["coupon_left"].format(code=code), [[("Modnamama", f"https://modnamama.ua/?c={code}")]])
+                DB.execute("insert or ignore into sent values(?,?,?)", (chat_id, f"coupexp:{code}", now))
             except Exception as e: print("remind", e)
             DB.execute("update coupons set reminded=1 where code=?", (code,))
         DB.commit()
@@ -496,13 +498,19 @@ def client_page(cid):
         if k.startswith("post:"):
             row = DB.execute("select text from posts where id=?", (k[5:],)).fetchone()
             hist.append((when, "розсилка", (row[0] if row else "?")[:120]))
+        elif k.startswith("coupexp:"):
+            hist.append((when, "службове", f"⏳ Нагадування: купон {k[8:]} діє ще 5 днів"))
         else:
             hist.append((when, "автонагадування", lif_texts.get(k, k)[:120]))
     plan = []
     done = {k for k, _ in sent_rows}
     for days, k, txt, url in LIFECYCLE.get(stage, []):
         if k in done or (k == "p3" and store == "Znana Mama"): continue
-        plan.append((time.strftime("%d.%m.%Y", time.localtime(created + days * DAY)), txt[:120]))
+        plan.append((created + days * DAY, txt[:120]))
+    for code, exp, rem in DB.execute("select code, expires, reminded from coupons where chat_id=? and expires>?", (cid, time.time())):
+        if not rem and f"coupexp:{code}" not in done:
+            plan.append((exp - 5 * DAY, f"⏳ Службове: купон {code} діє ще 5 днів"))
+    plan = [(time.strftime("%d.%m.%Y", time.localtime(ts)), txt) for ts, txt in sorted(plan)]
     tr = lambda cells: "<tr>" + "".join(f"<td>{x}</td>" for x in cells) + "</tr>"
     money = f"{total:,.0f}".replace(",", " ")
     coup_html = "<br>".join([f"<code>{c}</code> до {e[:10]}" for c, e in coup] + statics) or "—"
