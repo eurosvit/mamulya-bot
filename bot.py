@@ -151,10 +151,9 @@ def give(chat_id, gift):
 
 def send_support(chat_id):
     tg("sendMessage", chat_id=chat_id, parse_mode="HTML",
-       text=T["support"],
+       text=T["support"] + "\n\n📞 Viber: +38 063 632 40 10",
        reply_markup={"inline_keyboard": [
            [{"text": "💬 Telegram", "url": "https://t.me/+380636324010"}],
-           [{"text": "📞 Viber", "url": "viber://chat?number=%2B380636324010"}],
            [{"text": "💚 WhatsApp", "url": "https://wa.me/380636324010"}],
            [{"text": "❓ Часті питання", "callback_data": "faq"}]]})
 
