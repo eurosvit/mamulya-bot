@@ -20,6 +20,7 @@ create table if not exists sent(chat_id int, key text, ts real, primary key(chat
 create table if not exists posts(id integer primary key autoincrement, ts real, target text, text text);
 create table if not exists pool(code text primary key, chat_id int, ts real);
 create table if not exists names(phone text primary key, name text);
+create table if not exists b2b(phone text primary key);
 """)
 try: DB.execute("alter table orders add column amount real default 0")
 except Exception: pass
@@ -108,6 +109,7 @@ def save_order(o, names=None):
     phone = norm_phone((c0.get("phone") or [""])[0] if c0 else o.get("phone", ""))
     full = (str(c0.get("fName") or "") + " " + str(c0.get("lName") or "")).strip()
     if phone and full: DB.execute("insert or replace into names values(?,?)", (phone, full))
+    if phone and (c0.get("company") or "").strip(): DB.execute("insert or ignore into b2b values(?)", (phone,))
     names = names or {}
     items = [p.get("name") or names.get(p.get("productId"), "") for p in o.get("products", [])]
     store = STORES.get(o.get("sajt"), "")
@@ -200,6 +202,7 @@ def on_start(chat_id, arg):
             text=T["ask_phone"],
             reply_markup={"keyboard": [[{"text": "📱 Підтвердити номер", "request_contact": True}]], "resize_keyboard": True, "one_time_keyboard": True})
     stage = infer_stage(items)
+    if phone and DB.execute("select 1 from b2b where phone=?", (phone,)).fetchone(): stage = "b2b"
     old = DB.execute("select order_id, coalesce(bonus,0) from customers where chat_id=?", (chat_id,)).fetchone()
     if old and old[0] and old[0] != arg:
         # повторне замовлення: +1 вибір, купонні подарунки знову доступні (буде новий код)
@@ -216,6 +219,15 @@ def on_start(chat_id, arg):
     show_menu(chat_id, stage)
 
 ADMINS = {int(x) for x in os.environ.get("ADMIN_IDS", "").split(",") if x}
+
+def stage_from_dob(dob):
+    try: d, mth, y = map(int, dob.split("."))
+    except Exception: return None
+    import datetime
+    bd = datetime.date(y, mth, d); today = datetime.date.today()
+    if bd > today: return "pregnant"
+    months = (today - bd).days / 30.44
+    return "m0_3" if months < 3 else "m3_6" if months < 6 else "m6_12" if months < 12 else "lipoland"
 
 def on_text(chat_id, text):
     t = text.strip()
@@ -286,12 +298,17 @@ def on_text(chat_id, text):
             except Exception as e: print("post", e)
         DB.commit()
         return send(chat_id, f"Надіслано {ok}/{len(ids)}")
+    if t.lower().strip("!. ") in ("подарунок", "це подарунок", "на подарунок", "купувала на подарунок"):
+        DB.execute("update customers set stage='unknown', dob='' where chat_id=?", (chat_id,)); DB.commit()
+        return send(chat_id, "Зрозуміла 🎁 Вікових порад не надсилатиму — лише найкорисніше зрідка. Подарунки і купони працюють як завжди!")
     digits = "".join(c for c in t if c.isdigit())
     if len(digits) >= 10 and len(digits) <= 13 and not ("." in t or "," in t):
         return on_contact(chat_id, digits)
     if len(t) == 10 and t[2] == "." and t[5] == ".":
-        DB.execute("update customers set dob=? where chat_id=?", (t, chat_id)); DB.commit()
-        return send(chat_id, T["dob_saved"])
+        st = stage_from_dob(t)
+        if not st: return send(chat_id, "Не розібрала дату 😅 Напишіть у форматі 15.11.2026")
+        DB.execute("update customers set dob=?, stage=? where chat_id=?", (t, st, chat_id)); DB.commit()
+        return send(chat_id, T["dob_saved"] + "\n" + STAGE_PITCH.get(st, "").split("\n")[0])
     send_support(chat_id)
 
 def on_contact(chat_id, phone):
@@ -302,6 +319,7 @@ def on_contact(chat_id, phone):
         send(chat_id, T["order_missing"])
         return show_menu(chat_id, "unknown")
     items = json.loads(row[1]); stage = infer_stage(items)
+    if DB.execute("select 1 from b2b where phone=?", (ph,)).fetchone(): stage = "b2b"
     DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created,store) values(?,?,?,?,?,?)", (chat_id, row[0], ph, stage, time.time(), row[2] or "")); DB.commit()
     send(chat_id, T["order_found"].format(order_id=row[0], item=items[0][:60]) if items else T["order_missing"])
     show_menu(chat_id, stage)
@@ -359,6 +377,11 @@ def sync_orders(pages, limit=50):
 def cron():
     while True:
         now = time.time()
+        for chat_id, dob, cur_stage in DB.execute("select chat_id,dob,stage from customers where dob is not null and dob!='' and stage!='b2b'"):
+            st = stage_from_dob(dob)
+            if st and st != cur_stage:
+                DB.execute("update customers set stage=? where chat_id=?", (st, chat_id))
+        DB.commit()
         for chat_id, stage, created, store in DB.execute("select chat_id,stage,created,coalesce(store,'') from customers where picked>=0"):
             for days, key, text, url in LIFECYCLE.get(stage, []):
                 if key == "p3" and store == "Znana Mama": continue  # ponytail: не рекламуємо Znana її ж покупцям
@@ -411,7 +434,7 @@ class Hook(BaseHTTPRequestHandler):
         self.wfile.write(admin_page().encode())
     def log_message(self, *a): pass
 
-STAGE_UA = {"pregnant": "Вагітність/0–1", "m0_3": "0–3 міс", "m3_6": "3–6 міс", "m6_12": "6–12 міс", "lipoland": "Lipoland", "unknown": "Невідомо"}
+STAGE_UA = {"b2b": "Організація 🏢", "pregnant": "Вагітність/0–1", "m0_3": "0–3 міс", "m3_6": "3–6 міс", "m6_12": "6–12 міс", "lipoland": "Lipoland", "unknown": "Невідомо"}
 GIFT_UA = {"dila": "Dila −20%", "coupon": "−10% Modnamama", "mam150": "−150 ₴ Mamulya", "freeship": "Безкошт. доставка", "referral": "Реферальна", "znana10": "−10% Znana", "antiage": "AntiAge догляд"}
 
 LVL = [(25000, 10, "Діамант"), (15000, 7, "VIP"), (9000, 5, "Смарт"), (4500, 3, "Базовий")]
