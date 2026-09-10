@@ -197,7 +197,7 @@ def show_menu(chat_id, stage):
 def on_start(chat_id, arg):
     if arg.startswith("ref"):
         DB.execute("insert or ignore into customers(chat_id,order_id,phone,stage,created) values(?,?,?,?,?)", (chat_id, arg, "", "unknown", time.time())); DB.commit()
-        return send(chat_id, T["ref_welcome"], [[("Mamulya", "https://mamulya.lviv.ua"), ("Modnamama −10%", "https://modnamama.ua/?c=FRIEND10")]])
+        return send(chat_id, T["ref_welcome"], [[("Mamulya", "https://mamulya.lviv.ua"), ("Modnamama −300 ₴", "https://modnamama.ua/?c=FRIEND300")]])
     src = "sms" if arg.isdigit() else (arg or "direct")  # sms / qr / web / migrate / direct
     phone, items, store = fetch_order(arg) if arg.isdigit() else (None, [], "")
     if not phone:
@@ -461,7 +461,7 @@ class Hook(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
 STAGE_UA = {"b2b": "Організація 🏢", "pregnant": "Вагітність/0–1", "m0_3": "0–3 міс", "m3_6": "3–6 міс", "m6_12": "6–12 міс", "lipoland": "Lipoland", "unknown": "Невідомо"}
-GIFT_UA = {"dila": "Dila −20%", "coupon": "−10% Modnamama", "mam150": "−150 ₴ Mamulya", "freeship": "Безкошт. доставка", "referral": "Реферальна", "znana10": "−10% Znana", "antiage": "AntiAge догляд"}
+GIFT_UA = {"dila": "Dila −20%", "coupon": "−300 ₴ Modnamama", "mam150": "−150 ₴ Mamulya", "freeship": "Безкошт. доставка", "referral": "Реферальна", "znana10": "−10% Znana", "antiage": "AntiAge догляд"}
 
 LVL = [(25000, 10, "Діамант"), (15000, 7, "VIP"), (9000, 5, "Смарт"), (4500, 3, "Базовий")]
 
