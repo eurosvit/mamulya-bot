@@ -34,6 +34,8 @@ try: DB.execute("alter table customers add column bonus int default 0")
 except Exception: pass
 try: DB.execute("alter table orders add column status int default 0")
 except Exception: pass
+try: DB.execute("alter table customers add column src text default ''")
+except Exception: pass
 DAY = 86400
 
 # ---------- helpers ----------
@@ -195,8 +197,11 @@ def on_start(chat_id, arg):
     if arg.startswith("ref"):
         DB.execute("insert or ignore into customers(chat_id,order_id,phone,stage,created) values(?,?,?,?,?)", (chat_id, arg, "", "unknown", time.time())); DB.commit()
         return send(chat_id, T["ref_welcome"], [[("Mamulya", "https://mamulya.lviv.ua"), ("Modnamama −10%", "https://modnamama.ua/?c=FRIEND10")]])
-    phone, items, store = fetch_order(arg) if arg and arg != "web" else (None, [], "")
+    src = "sms" if arg.isdigit() else (arg or "direct")  # sms / qr / web / migrate / direct
+    phone, items, store = fetch_order(arg) if arg.isdigit() else (None, [], "")
     if not phone:
+        DB.execute("insert or ignore into customers(chat_id,order_id,phone,stage,created,src) values(?, '', '', 'unknown', ?, ?)", (chat_id, time.time(), src))
+        DB.execute("update customers set src=? where chat_id=? and coalesce(src,'')=''", (src, chat_id)); DB.commit()
         # без замовлення в посиланні — просимо підтвердити номер кнопкою Telegram
         return tg("sendMessage", chat_id=chat_id, parse_mode="HTML",
             text=T["ask_phone"],
@@ -214,7 +219,7 @@ def on_start(chat_id, arg):
         lvl = f"рівень {cur[2]}, ваша постійна знижка {cur[1]}%" if cur else (f"до знижки {nxt[1]}% лишилось {nxt[0]-total:,.0f} ₴".replace(",", " ") if nxt else "")
         send(chat_id, T["welcome_repeat"].format(store=store or "нашому магазині", total=f"{total:,.0f}".replace(",", " "), lvl=lvl))
         return show_menu(chat_id, stage)
-    DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created,store) values(?,?,?,?,?,?)", (chat_id, arg, phone, stage, time.time(), store)); DB.commit()
+    DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created,store,src) values(?,?,?,?,?,?,?)", (chat_id, arg, phone, stage, time.time(), store, src)); DB.commit()
     send(chat_id, T["welcome_store"].format(store=store) if store else T["welcome"])
     show_menu(chat_id, stage)
 
@@ -514,6 +519,7 @@ def admin_page():
                        f"<td class=b><i style=width:{int(r[1]/mx*100)}%></i></td></tr>" for r in rows)
     stages = q("select stage,count(*) from customers group by stage order by 2 desc")
     stores = q("select coalesce(nullif(store,''),'інше/маркетплейси'), count(*) from orders group by 1 order by 2 desc")
+    srcs = q("select coalesce(nullif(src,''),'—'), count(*) from customers group by 1 order by 2 desc")
     base = base_levels()
     lvl_counts = {}
     for _, _, name, *_ in base: lvl_counts[name] = lvl_counts.get(name, 0) + 1
