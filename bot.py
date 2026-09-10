@@ -126,7 +126,9 @@ def give(chat_id, gift):
             send(chat_id, T["gift_znana"].format(code=code, date=time.strftime("%d.%m", time.localtime(exp))),
                  [[("На Znana Mama", "https://znanamama.com.ua/khity")]])
         except Exception as e:
-            print("znana", e); send(chat_id, "Не вдалось видати код 🙏 Напишіть менеджеру — видасть вручну."); return
+            print("znana", e)
+            DB.execute("delete from gifts where chat_id=? and gift=?", (chat_id, gift)); DB.commit()
+            send(chat_id, "Не вдалось видати код 🙏 Спробуйте інший подарунок або напишіть менеджеру."); return
     elif gift == "freeship":
         send(chat_id, T["gift_freeship"])
     elif gift == "referral":
@@ -134,7 +136,9 @@ def give(chat_id, gift):
     elif gift == "mam150":
         # ponytail: Image CMS без API — пул кодів створюється руками в адмінці, бот роздає по одному
         row = DB.execute("select code from pool where chat_id is null limit 1").fetchone()
-        if not row: return send(chat_id, T["gift_mam150_empty"])
+        if not row:
+            DB.execute("delete from gifts where chat_id=? and gift=?", (chat_id, gift)); DB.commit()
+            return send(chat_id, T["gift_mam150_empty"])
         DB.execute("update pool set chat_id=?, ts=? where code=?", (chat_id, time.time(), row[0])); DB.commit()
         send(chat_id, T["gift_mam150"].format(code=row[0]), [[("На Mamulya", "https://mamulya.lviv.ua")]])
 
@@ -158,6 +162,8 @@ def show_menu(chat_id, stage):
     options = [g for g in gifts_for(stage) if not DB.execute("select 1 from gifts where chat_id=? and gift=?", (chat_id, g["id"])).fetchone()]
     if not os.environ.get("ZNANA_SECRET"):
         options = [g for g in options if g["id"] != "znana10"]  # ponytail: без секрета кнопку не показуємо
+    if not DB.execute("select 1 from pool where chat_id is null limit 1").fetchone():
+        options = [g for g in options if g["id"] != "mam150"]  # порожній пул — кнопку ховаємо
     send(chat_id, T["menu_header"].format(left=2 - picked), [[(g["label"], "gift:" + g["id"])] for g in options])
 
 # ---------- handlers ----------
