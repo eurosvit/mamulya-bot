@@ -29,6 +29,8 @@ try: DB.execute("alter table customers add column store text default ''")
 except Exception: pass
 try: DB.execute("alter table sent add column ts real")
 except Exception: pass
+try: DB.execute("alter table customers add column bonus int default 0")
+except Exception: pass
 DAY = 86400
 
 # ---------- helpers ----------
@@ -155,7 +157,8 @@ def send_support(chat_id):
 
 def show_menu(chat_id, stage):
     picked = DB.execute("select count(*) from gifts where chat_id=?", (chat_id,)).fetchone()[0]
-    if picked >= 2:
+    limit = 2 + (DB.execute("select coalesce(bonus,0) from customers where chat_id=?", (chat_id,)).fetchone() or [0])[0]
+    if picked >= limit:
         send(chat_id, T["gifts_done"])
         row = DB.execute("select stage,dob from customers where chat_id=?", (chat_id,)).fetchone()
         if row and not row[1] and row[0] in ("pregnant", "unknown"):
@@ -180,6 +183,15 @@ def on_start(chat_id, arg):
             text=T["ask_phone"],
             reply_markup={"keyboard": [[{"text": "📱 Підтвердити номер", "request_contact": True}]], "resize_keyboard": True, "one_time_keyboard": True})
     stage = infer_stage(items)
+    old = DB.execute("select order_id, coalesce(bonus,0) from customers where chat_id=?", (chat_id,)).fetchone()
+    if old and old[0] and old[0] != arg:
+        # повторне замовлення: +1 вибір, купонні подарунки знову доступні (буде новий код)
+        DB.execute("update customers set order_id=?, phone=?, stage=?, created=?, store=?, bonus=? where chat_id=?",
+                   (arg, phone, stage, time.time(), store, old[1] + 1, chat_id))
+        DB.execute("delete from gifts where chat_id=? and gift in ('coupon','znana10')", (chat_id,)); DB.commit()
+        total = DB.execute("select coalesce(sum(amount),0) from orders where phone=?", (phone,)).fetchone()[0]
+        send(chat_id, T["welcome_repeat"].format(store=store or "нашому магазині", total=f"{total:,.0f}".replace(",", " ")))
+        return show_menu(chat_id, stage)
     DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created,store) values(?,?,?,?,?,?)", (chat_id, arg, phone, stage, time.time(), store)); DB.commit()
     send(chat_id, T["welcome_store"].format(store=store) if store else T["welcome"])
     show_menu(chat_id, stage)
