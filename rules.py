@@ -22,13 +22,14 @@ G = lambda i, l: {"id": i, "label": l}
 DILA, COUPON, REF, SHIP = G("dila", "🧪 Dila −20% на аналізи"), G("coupon", "🛍 −10% на все для малюка"), G("referral", "🤝 Подрузі −10%, мені −10%"), G("freeship", "📦 Безкоштовна доставка")
 MAM = G("mam150", "🎟 −150 ₴ на Mamulya")
 ZN = G("znana10", "🤍 −10% на одяг для мам Znana")
+AA = G("antiage", "💆‍♀️ Догляд для мами (AntiAge)")
 
 GIFTS = {
     "pregnant": [DILA, COUPON, ZN, MAM, SHIP, REF],
     "m0_3":     [DILA, COUPON, ZN, MAM, SHIP, REF],
     "m3_6":     [COUPON, MAM, DILA, SHIP, REF],
-    "m6_12":    [COUPON, MAM, SHIP, REF, DILA],
-    "lipoland": [MAM, DILA, COUPON, SHIP, REF],
+    "m6_12":    [COUPON, MAM, AA, SHIP, REF, DILA],
+    "lipoland": [MAM, AA, DILA, COUPON, SHIP, REF],
     "unknown":  [COUPON, DILA, MAM, SHIP, REF],
 }
 gifts_for = lambda stage: GIFTS.get(stage, GIFTS["unknown"])
@@ -43,7 +44,8 @@ LIFECYCLE = {
                  (75, "a2", "Купання й догляд для 3–6 міс — що реально знадобиться.", MM + "3-6m")],
     "m3_6":     [(60, "b1", "Скоро прикорм 🥄 Стільчик, тарілка Memoram, нагрудники:", MM + "6-12m"),
                  (120, "b2", "Одяг на зріст 68–80: нова добірка в Modnamama.", MM + "6-12m")],
-    "m6_12":    [(60, "c1", "Рюкзак 2 розмір (від 6 кг) — для тих, хто вже сидить:", MM + "6-12m"),
+    "m6_12":    [(100, "c4", "Мамо, а про себе не забули? 💛 Доглядова косметика від нашого AntiAge Cosmetics — маленький ритуал тільки для вас.", "https://antiagecosmetics.com.ua"),
+                 (60, "c1", "Рюкзак 2 розмір (від 6 кг) — для тих, хто вже сидить:", MM + "6-12m"),
                  (150, "c2", "Перші ігри й книжечки — знайомтесь із Lipoland 🧩", "https://mamulya.lviv.ua/shop/brand/lipoland"),
                  (540, "c3", "Вашій дитині ~2 роки — саме час для книжечок на липучках Lipoland.", "https://mamulya.lviv.ua/shop/brand/lipoland")],
     "lipoland": [(60, "l1", "Нові набори Lipoland для наступного етапу:", "https://mamulya.lviv.ua/shop/brand/lipoland"),
@@ -69,6 +71,7 @@ TEXTS = {
  "gift_coupon":   "🛍 <b>−10% на все для малюка</b> в Modnamama — це наш другий, великий магазин: коляски, стільчики, ванночки, іграшки, одяг — у 20 разів більший вибір, ніж на Mamulya.\n\nКод: <code>{code}</code> — застосується сам, просто перейдіть за кнопкою. Діє до {date}.",
  "gift_mam150":   "🎟 <b>−150 ₴</b> на наступне замовлення в Mamulya від 1 500 ₴.\nКод: <code>{code}</code> — введіть у полі «Маєш код на знижку?».",
  "gift_znana":    "🤍 <b>−10% на одяг для вагітних і годуючих Znana Mama</b> — наш власний бренд: топи, сорочки, халати, білизна.\nКод: <code>{code}</code> — введіть у кошику на znanamama.com.ua. Діє до {date}, одноразовий.",
+ "gift_antiage":  "💆‍♀️ Рік ви дбали про малюка — час подбати і про себе. Знижка {desc} на доглядову косметику в нашому магазині <a href=\"https://antiagecosmetics.com.ua\">AntiAge Cosmetics</a>.\nКод: <code>{code}</code> — введіть у кошику.",
  "gift_mam150_empty": "Коди тимчасово закінчились — менеджер надішле вручну 🙏",
  "gift_freeship": "📦 Безкоштовна доставка на наступне замовлення в Mamulya.\nКод: <code>FREESHIP</code> — введіть у полі «Маєш код на знижку?».",
  "gift_referral": "🤝 Подрузі −10%, вам −10% після її замовлення.\nВаше посилання:\nhttps://t.me/{bot}?start=ref{chat_id}",
@@ -100,6 +103,6 @@ if __name__ == "__main__":
     assert infer_stage(["Ортопедична подушка для грудного вигодовування Feeding Pillow"]) == "pregnant"
     assert infer_stage(["Ерго-рюкзак Adapted Капучино DiSling 1 розмір"]) == "m3_6"
     assert infer_stage([]) == "unknown"
-    assert all(5 <= len(v) <= 6 for v in GIFTS.values())
-    assert all(g["id"] in ("dila","coupon","mam150","freeship","referral","znana10") for v in GIFTS.values() for g in v)
+    assert all(5 <= len(v) <= 7 for v in GIFTS.values())
+    assert all(g["id"] in ("dila","coupon","mam150","freeship","referral","znana10","antiage") for v in GIFTS.values() for g in v)
     print("ok")

@@ -100,7 +100,7 @@ def fetch_order(order_id):
         except Exception as e: print("salesdrive", e)
     return None, [], ""
 
-STORES = {94: "Mamulya", 97: "Mamulya", 134: "Mamulya", 120: "Modnamama", 150: "Modnamama", 157: "Modnamama", 164: "Znana Mama"}
+STORES = {94: "Mamulya", 97: "Mamulya", 134: "Mamulya", 120: "Modnamama", 150: "Modnamama", 157: "Modnamama", 164: "Znana Mama", 22: "AntiAge"}
 # ponytail: у накопичення йдуть лише SOLD (5) — «забрав і оплатив»; решта статусів не рахується
 
 def save_order(o, names=None):
@@ -137,6 +137,13 @@ def give(chat_id, gift):
             print("znana", e)
             DB.execute("delete from gifts where chat_id=? and gift=?", (chat_id, gift)); DB.commit()
             send(chat_id, "Не вдалось видати код 🙏 Спробуйте інший подарунок або напишіть менеджеру."); return
+    elif gift == "antiage":
+        code = os.environ.get("ANTIAGE_CODE", "")
+        if not code:
+            DB.execute("delete from gifts where chat_id=? and gift=?", (chat_id, gift)); DB.commit()
+            return send(chat_id, T["gift_mam150_empty"])
+        send(chat_id, T["gift_antiage"].format(code=code, desc=os.environ.get("ANTIAGE_DESC", "−10%")),
+             [[("На AntiAge Cosmetics", "https://antiagecosmetics.com.ua")]])
     elif gift == "freeship":
         send(chat_id, T["gift_freeship"])
     elif gift == "referral":
@@ -177,6 +184,8 @@ def show_menu(chat_id, stage):
         options = [g for g in options if g["id"] != "znana10"]  # ponytail: без секрета кнопку не показуємо
     if not os.environ.get("MAM150_CODE"):
         options = [g for g in options if g["id"] != "mam150"]  # код не заданий — кнопку ховаємо
+    if not os.environ.get("ANTIAGE_CODE"):
+        options = [g for g in options if g["id"] != "antiage"]
     send(chat_id, T["menu_header"].format(left=2 - picked), [[(g["label"], "gift:" + g["id"])] for g in options])
 
 # ---------- handlers ----------
@@ -403,7 +412,7 @@ class Hook(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
 STAGE_UA = {"pregnant": "Вагітність/0–1", "m0_3": "0–3 міс", "m3_6": "3–6 міс", "m6_12": "6–12 міс", "lipoland": "Lipoland", "unknown": "Невідомо"}
-GIFT_UA = {"dila": "Dila −20%", "coupon": "−10% Modnamama", "mam150": "−150 ₴ Mamulya", "freeship": "Безкошт. доставка", "referral": "Реферальна"}
+GIFT_UA = {"dila": "Dila −20%", "coupon": "−10% Modnamama", "mam150": "−150 ₴ Mamulya", "freeship": "Безкошт. доставка", "referral": "Реферальна", "znana10": "−10% Znana", "antiage": "AntiAge догляд"}
 
 LVL = [(25000, 10, "Діамант"), (15000, 7, "VIP"), (9000, 5, "Смарт"), (4500, 3, "Базовий")]
 
