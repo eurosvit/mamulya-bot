@@ -275,6 +275,15 @@ def on_text(chat_id, text):
             f"🎟 Активних купонів: {live}\n"
             f"🎟 Вільних кодів −150: {n('select count(*) from pool where chat_id is null')}\n"
             f"📦 Замовлень у базі: {n('select count(*) from orders')}")
+    if chat_id in ADMINS and t.startswith("/b2b "):
+        ph = norm_phone(t.split()[1])
+        if DB.execute("select 1 from b2b where phone=?", (ph,)).fetchone():
+            DB.execute("delete from b2b where phone=?", (ph,))
+            DB.execute("update customers set stage='unknown' where phone=?", (ph,)); DB.commit()
+            return send(chat_id, f"🏢 {ph} — позначку «Організація» знято")
+        DB.execute("insert or ignore into b2b values(?)", (ph,))
+        DB.execute("update customers set stage='b2b' where phone=?", (ph,)); DB.commit()
+        return send(chat_id, f"🏢 {ph} — позначено як «Організація»: без вікових розсилок")
     if chat_id in ADMINS and t.startswith("/pool "):
         DB.executemany("insert or ignore into pool(code) values(?)", [(c,) for c in t.split()[1:]]); DB.commit()
         return send(chat_id, f"Додано. У пулі вільних: {DB.execute('select count(*) from pool where chat_id is null').fetchone()[0]}")
