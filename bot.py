@@ -24,6 +24,8 @@ try: DB.execute("alter table orders add column amount real default 0")
 except Exception: pass
 try: DB.execute("alter table orders add column store text default ''")
 except Exception: pass
+try: DB.execute("alter table customers add column store text default ''")
+except Exception: pass
 DAY = 86400
 
 # ---------- helpers ----------
@@ -78,17 +80,18 @@ def product_names(resp):
     except Exception: return {}
 
 def fetch_order(order_id):
-    row = DB.execute("select phone,items from orders where order_id=?", (order_id,)).fetchone()
-    if row: return row[0], json.loads(row[1])
+    row = DB.execute("select phone,items,store from orders where order_id=?", (order_id,)).fetchone()
+    if row: return row[0], json.loads(row[1]), row[2]
     # ponytail: fallback — тягнемо з SalesDrive API, якщо вебхук не встиг
     if os.environ.get("SALESDRIVE_KEY"):
         try:
             req = urllib.request.Request(f"https://aleyana.salesdrive.me/api/order/list/?filter[id]={order_id}",
                                          headers={"Form-Api-Key": os.environ["SALESDRIVE_KEY"]})
             resp = json.load(urllib.request.urlopen(req, timeout=20))
-            return save_order(resp["data"][0], product_names(resp))
+            ph, it = save_order(resp["data"][0], product_names(resp))
+            return ph, it, STORES.get(resp["data"][0].get("sajt"), "")
         except Exception as e: print("salesdrive", e)
-    return None, []
+    return None, [], ""
 
 STORES = {94: "Mamulya", 97: "Mamulya", 134: "Mamulya", 120: "Modnamama", 150: "Modnamama", 157: "Modnamama", 164: "Znana Mama"}
 
@@ -148,15 +151,15 @@ def on_start(chat_id, arg):
     if arg.startswith("ref"):
         DB.execute("insert or ignore into customers(chat_id,order_id,phone,stage,created) values(?,?,?,?,?)", (chat_id, arg, "", "unknown", time.time())); DB.commit()
         return send(chat_id, T["ref_welcome"], [[("Mamulya", "https://mamulya.lviv.ua"), ("Modnamama −10%", "https://modnamama.ua/?c=FRIEND10")]])
-    phone, items = fetch_order(arg) if arg and arg != "web" else (None, [])
+    phone, items, store = fetch_order(arg) if arg and arg != "web" else (None, [], "")
     if not phone:
         # без замовлення в посиланні — просимо підтвердити номер кнопкою Telegram
         return tg("sendMessage", chat_id=chat_id, parse_mode="HTML",
             text=T["ask_phone"],
             reply_markup={"keyboard": [[{"text": "📱 Підтвердити номер", "request_contact": True}]], "resize_keyboard": True, "one_time_keyboard": True})
     stage = infer_stage(items)
-    DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created) values(?,?,?,?,?)", (chat_id, arg, phone, stage, time.time())); DB.commit()
-    send(chat_id, T["welcome"])
+    DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created,store) values(?,?,?,?,?,?)", (chat_id, arg, phone, stage, time.time(), store)); DB.commit()
+    send(chat_id, T["welcome_store"].format(store=store) if store else T["welcome"])
     show_menu(chat_id, stage)
 
 ADMINS = {int(x) for x in os.environ.get("ADMIN_IDS", "").split(",") if x}
@@ -214,9 +217,14 @@ def on_text(chat_id, text):
         return send(chat_id, f"Додано. У пулі вільних: {DB.execute('select count(*) from pool where chat_id is null').fetchone()[0]}")
     if chat_id in ADMINS and t.startswith("/post"):
         # /post текст — усім; /post m3_6 текст — тільки стадії
-        parts = t.split(" ", 2); stage = parts[1] if len(parts) > 2 and parts[1] in LIFECYCLE else None
-        body = parts[2] if stage else t[5:].strip()
-        ids = [r[0] for r in DB.execute("select chat_id from customers" + (" where stage=?" if stage else ""), (stage,) if stage else ())]
+        parts = t.split(" ", 2)
+        STORE_ARG = {"mamulya": "Mamulya", "modnamama": "Modnamama", "znana": "Znana Mama"}
+        stage = parts[1] if len(parts) > 2 and parts[1] in LIFECYCLE else None
+        store = STORE_ARG.get(parts[1].lower()) if len(parts) > 2 else None
+        body = parts[2] if (stage or store) else t[5:].strip()
+        if stage: ids = [r[0] for r in DB.execute("select chat_id from customers where stage=?", (stage,))]
+        elif store: ids = [r[0] for r in DB.execute("select chat_id from customers where store=?", (store,))]
+        else: ids = [r[0] for r in DB.execute("select chat_id from customers")]
         ok = 0
         for cid in ids:
             try: send(cid, body); ok += 1
@@ -229,13 +237,13 @@ def on_text(chat_id, text):
 
 def on_contact(chat_id, phone):
     ph = norm_phone(phone)
-    row = DB.execute("select order_id,items from orders where phone=? order by ts desc limit 1", (ph,)).fetchone()
+    row = DB.execute("select order_id,items,store from orders where phone=? order by ts desc limit 1", (ph,)).fetchone()
     if not row:
         DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created) values(?,?,?,?,?)", (chat_id, "", ph, "unknown", time.time())); DB.commit()
         send(chat_id, T["order_missing"])
         return show_menu(chat_id, "unknown")
     items = json.loads(row[1]); stage = infer_stage(items)
-    DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created) values(?,?,?,?,?)", (chat_id, row[0], ph, stage, time.time())); DB.commit()
+    DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created,store) values(?,?,?,?,?,?)", (chat_id, row[0], ph, stage, time.time(), row[2] or "")); DB.commit()
     send(chat_id, T["order_found"].format(order_id=row[0], item=items[0][:60]) if items else T["order_missing"])
     show_menu(chat_id, stage)
 
