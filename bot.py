@@ -268,7 +268,7 @@ def on_text(chat_id, text):
         if st not in LIFECYCLE: return send(chat_id, "Стадії: " + ", ".join(LIFECYCLE))
         send(chat_id, f"🔎 Демо для стадії «{STAGE_UA.get(st, st)}». Так це побачить клієнт:")
         DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created) values(?,?,?,?,?)", (chat_id, "demo", "", st, time.time())); DB.execute("delete from gifts where chat_id=?", (chat_id,)); DB.commit()
-        send(chat_id, "Дякуємо за замовлення 💛 Ми підготували подарунки — оберіть два, які вам зараз корисні.")
+        send(chat_id, "Дякуємо за замовлення 💗 Ми підготували подарунки — оберіть два, які вам зараз корисні.")
         show_menu(chat_id, st)
         for days, key, text, url in LIFECYCLE[st]:
             send(chat_id, f"⏰ <i>через {days} дн:</i>\n{text}", [[("Подивитись", url)]] if url else None)
@@ -544,7 +544,7 @@ def near_page():
     getname = lambda ph: (DB.execute("select name from names where phone=?", (ph,)).fetchone() or ["—"])[0]
     rows = "".join(f"<tr><td>{b[0]}</td><td>{getname(b[0])}</td><td class=n>{b[1]:,.0f} ₴</td><td>{b[2]}</td><td class=n>{b[5]:,.0f} ₴</td><td>{b[4]}</td></tr>".replace(",", " ") for b in near)
     return f"""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>Трішки до рівня</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💛</text></svg>">
+<title>Трішки до рівня</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
 <style>body{{font:13.5px/1.5 "Golos Text",system-ui,sans-serif;margin:0;background:#F7F2F0;color:#2B2226;padding:24px}}
 h1{{font-size:18px}}table{{border-collapse:collapse;background:#fff;border:1px solid #EADFDB;border-radius:12px;width:100%;max-width:860px;font-size:13px}}
 td,th{{padding:6px 12px;border-bottom:1px solid #EADFDB;text-align:left}}th{{font-size:10.5px;text-transform:uppercase;color:#A1939A}}
@@ -569,6 +569,13 @@ def admin_page():
     pickers = nc - p0
     bso = dict(q(f"select coalesce(nullif(store,''),'інше'), count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8) group by 1"))
     bse = dict(q(f"select coalesce(nullif(store,''),'інше'), count(*) from customers where created>={LAUNCH} group by 1"))
+    daily_o = dict(q(f"select date(ts,'unixepoch','localtime') d, count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8) group by d"))
+    daily_e = dict(q(f"select date(created,'unixepoch','localtime') d, count(*) from customers where created>={LAUNCH} group by d"))
+    daily_rows = ""
+    for d in sorted(set(daily_o) | set(daily_e), reverse=True)[:14]:
+        o, e = daily_o.get(d, 0), daily_e.get(d, 0)
+        c = f"{e/o*100:.0f}%" if o else "—"
+        daily_rows += f"<tr><td>{d[8:10]}.{d[5:7]}</td><td class=n>{o}</td><td class=n>{e}</td><td class=n>{c}</td></tr>"
     stages = q("select stage,count(*) from customers group by stage order by 2 desc")
     stores = q("select coalesce(nullif(store,''),'інше'), count(*) from orders group by 1 order by 2 desc")
     srcs = q("select coalesce(nullif(src,''),'—'), count(*) from customers group by 1 order by 2 desc")
@@ -627,7 +634,7 @@ def admin_page():
         return f'<details class="p wide"><summary>{title}</summary>{inner}</details>'
 
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>Mamulya Bot — кабінет</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💛</text></svg>">
+<title>Mamulya Bot — кабінет</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
 <style>
 :root{{--bg:#F7F2F0;--card:#FFF;--line:#EADFDB;--ink:#2B2226;--ink2:#6E5F65;--ink3:#A1939A;--acc:#B8325A;--acc-dim:#F8E4EA}}
@@ -653,12 +660,13 @@ code{{font-size:11.5px;background:var(--acc-dim);padding:0 4px;border-radius:4px
 details.p summary{{cursor:pointer;font-size:13px;font-weight:600;color:var(--ink2)}}
 details.p[open] summary{{margin-bottom:8px}}
 </style>
-<div class=top><h1>💛 Mamulya Bot</h1><span class=upd>оновлено {time.strftime("%d.%m %H:%M")}</span>
+<div class=top><h1>💗 Mamulya Bot</h1><span class=upd>оновлено {time.strftime("%d.%m %H:%M")}</span>
 <span class=upd style=margin-left:auto><a href="/segments.csv?key={AK}">CSV сегментів ↓</a></span></div>
 <div class=tiles>{"".join(f"<div class=tile><b>{v}</b><span>{k}</span></div>" for k, v in cards)}</div>
 <div class=grid>
 {panel("Воронка · SMS → бот → подарунки", f"<table>{fun}</table>")}
 {panel("Звідки прийшли в бот", f"<table>{rows(srcs, SRC_UA)}</table>")}
+{panel("По днях", f"<table><tr><th>Дата</th><th>Замовл.</th><th>У бот</th><th>Конв.</th></tr>{daily_rows}</table>", extra=" <small>останні 14 днів</small>")}
 {panel("Обрані подарунки", f"<table>{rows(gifts, GIFT_UA, pct_of=pickers or 1)}</table>", extra=f" <small>% від {pickers} з подарунками</small>")}
 {panel("Купони", f"<table>{coup_sum}</table>")}
 {panel("Замовлення за магазинами", f"<table>{rows(stores)}</table>")}
