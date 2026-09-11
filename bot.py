@@ -452,6 +452,9 @@ class Hook(BaseHTTPRequestHandler):
             DB.commit()
             cid = qs.get("id", ["0"])[0]
             self.send_response(302); self.send_header("Location", f"/client?key={os.environ.get('ADMIN_KEY','')}&id={cid}"); self.end_headers(); return
+        if u.path == "/near" and authed:
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
+            self.wfile.write(near_page().encode()); return
         if u.path == "/client" and authed:
             cid = int(qs.get("id", ["0"])[0])
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
@@ -534,6 +537,23 @@ td,th{{padding:7px 12px;border-bottom:1px solid #E8DCD8;text-align:left;vertical
 <table><tr><th>Дата</th><th>Повідомлення</th></tr>{"".join(tr(r) for r in plan) or tr(("—","для цієї стадії все надіслано"))}</table>
 <p style="color:#A1939A">Плюс службові: нагадування про купон за 5 днів до кінця дії (якщо є активний купон).</p>"""
 
+def near_page():
+    AK = os.environ.get("ADMIN_KEY", "")
+    base = base_levels()
+    near = sorted([b for b in base if 0 < b[5] <= 1000], key=lambda b: b[5])
+    getname = lambda ph: (DB.execute("select name from names where phone=?", (ph,)).fetchone() or ["—"])[0]
+    rows = "".join(f"<tr><td>{b[0]}</td><td>{getname(b[0])}</td><td class=n>{b[1]:,.0f} ₴</td><td>{b[2]}</td><td class=n>{b[5]:,.0f} ₴</td><td>{b[4]}</td></tr>".replace(",", " ") for b in near)
+    return f"""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Трішки до рівня</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💛</text></svg>">
+<style>body{{font:13.5px/1.5 "Golos Text",system-ui,sans-serif;margin:0;background:#F7F2F0;color:#2B2226;padding:24px}}
+h1{{font-size:18px}}table{{border-collapse:collapse;background:#fff;border:1px solid #EADFDB;border-radius:12px;width:100%;max-width:860px;font-size:13px}}
+td,th{{padding:6px 12px;border-bottom:1px solid #EADFDB;text-align:left}}th{{font-size:10.5px;text-transform:uppercase;color:#A1939A}}
+td.n{{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}}a{{color:#B8325A}}</style>
+<p><a href="/admin?key={AK}">← кабінет</a></p>
+<h1>«Трішки до рівня» ≤1000 ₴ — {len(near)} клієнтів</h1>
+<p style=color:#6E5F65;font-size:13px>Найгарячіший сегмент для SMS: маленька сума до постійної знижки. <a href="/segments.csv?key={AK}">Вивантажити CSV ↓</a></p>
+<table><tr><th>Телефон</th><th>Імʼя</th><th>Сума</th><th>Рівень</th><th>До наступного</th><th>Наступний</th></tr>{rows}</table>"""
+
 def admin_page():
     AK = os.environ.get("ADMIN_KEY", "")
     q = lambda sql, *a: DB.execute(sql, a).fetchall()
@@ -556,7 +576,8 @@ def admin_page():
     base = base_levels()
     lvl_counts = {}
     for _, _, name, *_ in base: lvl_counts[name] = lvl_counts.get(name, 0) + 1
-    near = sorted([b for b in base if 0 < b[5] <= 1000], key=lambda b: b[5])[:200]
+    near_all = sorted([b for b in base if 0 < b[5] <= 1000], key=lambda b: b[5])
+    near = near_all[:10]
     getname = lambda ph: (DB.execute("select name from names where phone=?", (ph,)).fetchone() or ["—"])[0]
     cptype = lambda pfx: (n(f"select count(*) from coupons where code like '{pfx}%'"), n(f"select count(*) from coupons where code like '{pfx}%' and expires>{now}"))
     mm_all, mm_live = cptype("MMBOT"); zn_all, zn_live = cptype("ZNBOT")
@@ -643,7 +664,7 @@ details.p[open] summary{{margin-bottom:8px}}
 {panel("Замовлення за магазинами", f"<table>{rows(stores)}</table>")}
 {panel("Клієнти за стадіями", f"<table>{rows(stages, STAGE_UA)}</table>")}
 {panel("Рівні бази", f"<table>{lvl_rows}</table>", extra=f" <small>{len(base)} клієнтів з покупками</small>")}
-{panel("«Трішки до рівня» ≤1000 ₴", f"<table><tr><th>Телефон</th><th>Імʼя</th><th>Сума</th><th>До рівня</th></tr>{near_rows}</table>", extra=f" <small>{len(near)}</small>")}
+{panel("«Трішки до рівня» ≤1000 ₴", f"<table><tr><th>Телефон</th><th>Імʼя</th><th>Сума</th><th>До рівня</th></tr>{near_rows}</table><p style=margin:8px 0 0;font-size:12.5px><a href=/near?key={AK}>Відкрити всіх {len(near_all)} →</a></p>", extra=f" <small>топ-10 з {len(near_all)}</small>")}
 {panel("Останні клієнти", f"<table><tr><th>Клієнт</th><th>Телефон</th><th>Магазин</th><th>Стадія</th><th>ДН/ПДР</th><th>Джерело</th><th>Зайшла</th><th>🎁</th></tr>{cust_rows}</table>", wide=True)}
 {det("🎟 Останні видані купони", f"<table><tr><th>Код</th><th>Кому</th><th>До</th><th></th></tr>{coup_list or '<tr><td>поки нема</td></tr>'}</table>")}
 {det("⚙️ Стадія ← товар", f"<table>{cfg_stage}</table>")}
