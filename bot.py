@@ -49,7 +49,7 @@ KB = {"keyboard": [[{"text": "🎁 Подарунки"}, {"text": "🎟 Мої �
       "resize_keyboard": True, "is_persistent": True}
 
 def send(chat_id, text, buttons=None):
-    kw = dict(chat_id=chat_id, text=text, parse_mode="HTML")
+    kw = dict(chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
     if buttons:  # [[("label","data_or_url"),...]]
         kw["reply_markup"] = {"inline_keyboard": [[
             {"text": t, **({"url": d} if d.startswith("http") else {"callback_data": d})} for t, d in row] for row in buttons]}
