@@ -36,6 +36,8 @@ try: DB.execute("alter table orders add column status int default 0")
 except Exception: pass
 try: DB.execute("alter table customers add column src text default ''")
 except Exception: pass
+DB.execute("update orders set store='Mamulya.lviv' where store='Mamulya'")
+DB.execute("update customers set store='Mamulya.lviv' where store='Mamulya'")
 DAY = 86400
 
 # ---------- helpers ----------
@@ -97,7 +99,7 @@ def fetch_order(order_id):
         except Exception as e: print("salesdrive", e)
     return None, [], ""
 
-STORES = {94: "Mamulya", 97: "Mamulya", 134: "Mamulya", 120: "Modnamama", 150: "Modnamama", 157: "Modnamama", 164: "Znana Mama", 22: "AntiAge"}
+STORES = {94: "Mamulya.lviv", 97: "Mamulya.lviv", 134: "Mamulya.lviv", 120: "Modnamama", 150: "Modnamama", 157: "Modnamama", 164: "Znana Mama", 22: "AntiAge"}
 # ponytail: рахуємо все живе одразу; DECLINED/Повернення/Скасований/TEST/Видалений випадають самі при зміні статусу (вебхук)
 
 def save_order(o, names=None):
@@ -251,7 +253,7 @@ def on_text(chat_id, text):
         # ponytail: сума всіх замовлень без фільтра статусу — скасовані завищать; уточнимо, коли зберігатимемо статус
         total = DB.execute("select coalesce(sum(amount),0) from orders where phone=? and status not in (6,7,13,15,8)", (row[0],)).fetchone()[0]
         cur, nxt = level_of(total)
-        msg = f"💎 Ваші покупки в Mamulya + Modnamama: <b>{total:,.0f} ₴</b>\n".replace(",", " ")
+        msg = f"💎 Ваші покупки в наших магазинах разом: <b>{total:,.0f} ₴</b>\n".replace(",", " ")
         msg += f"Рівень: <b>{cur[2]}</b> — постійна знижка {cur[1]}%\n" if cur else "Рівень: на старті програми 🚀\n"
         if nxt: msg += f"До рівня «{nxt[2]}» ({nxt[1]}%) лишилось {nxt[0]-total:,.0f} ₴".replace(",", " ")
         else: msg += "Це максимальний рівень — вітаємо! 🎉"
@@ -296,7 +298,7 @@ def on_text(chat_id, text):
     if chat_id in ADMINS and t.startswith("/post"):
         # /post текст — усім; /post m3_6 текст — тільки стадії
         parts = t.split(" ", 2)
-        STORE_ARG = {"mamulya": "Mamulya", "modnamama": "Modnamama", "znana": "Znana Mama"}
+        STORE_ARG = {"mamulya": "Mamulya.lviv", "modnamama": "Modnamama", "znana": "Znana Mama"}
         stage = parts[1] if len(parts) > 2 and parts[1] in LIFECYCLE else None
         store = STORE_ARG.get(parts[1].lower()) if len(parts) > 2 else None
         body = parts[2] if (stage or store) else t[5:].strip()
@@ -466,7 +468,7 @@ class Hook(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
 STAGE_UA = {"b2b": "Організація 🏢", "pregnant": "Вагітність/0–1", "m0_3": "0–3 міс", "m3_6": "3–6 міс", "m6_12": "6–12 міс", "lipoland": "Lipoland", "unknown": "Невідомо"}
-GIFT_UA = {"dila": "Dila −20%", "coupon": "−300 ₴ Modnamama", "mam150": "−150 ₴ Mamulya", "freeship": "Безкошт. доставка", "referral": "Реферальна", "znana10": "−10% Znana", "antiage": "AntiAge догляд"}
+GIFT_UA = {"dila": "Dila −20%", "coupon": "−300 ₴ Modnamama", "mam150": "−150 ₴ Mamulya.lviv", "freeship": "Безкошт. доставка", "referral": "Реферальна", "znana10": "−10% Znana", "antiage": "AntiAge догляд"}
 
 LVL = [(25000, 10, "Діамант"), (15000, 7, "VIP"), (9000, 5, "Смарт"), (4500, 3, "Базовий")]
 
@@ -490,8 +492,8 @@ def client_page(cid):
     static_map = {"mam150": ("MAM150_CODE", "Mamulya"), "freeship": (None, "FREESHIP · Mamulya"), "antiage": ("ANTIAGE_CODE", "AntiAge")}
     taken = {g for (g,) in DB.execute("select gift from gifts where chat_id=?", (cid,))}
     statics = []
-    if "freeship" in taken: statics.append("<code>FREESHIP</code> (безстроковий · Mamulya)")
-    if "mam150" in taken and os.environ.get("MAM150_CODE"): statics.append(f"<code>{os.environ['MAM150_CODE']}</code> (статичний · Mamulya)")
+    if "freeship" in taken: statics.append("<code>FREESHIP</code> (безстроковий · Mamulya.lviv)")
+    if "mam150" in taken and os.environ.get("MAM150_CODE"): statics.append(f"<code>{os.environ['MAM150_CODE']}</code> (статичний · Mamulya.lviv)")
     if "antiage" in taken and os.environ.get("ANTIAGE_CODE"): statics.append(f"<code>{os.environ['ANTIAGE_CODE']}</code> (статичний · AntiAge)")
     lif_texts = {k: t for st in LIFECYCLE.values() for _, k, t, _ in st}
     sent_rows = DB.execute("select key, ts from sent where chat_id=? order by coalesce(ts,0)", (cid,)).fetchall()
