@@ -24,3 +24,24 @@ services:
         sync: false
       - key: ADMIN_KEY
         sync: false
+  - type: web
+    name: antiage-bot
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 antiage_bot.py
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DB
+        value: /data/antiage.db
+      - key: ADMIN_IDS
+        value: "97039643"
+      - key: PEER_ADMIN
+        value: https://mamulya-bot.onrender.com/admin?key=a2d4bf054245ea8551e5036b
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_KEY
+        sync: false
