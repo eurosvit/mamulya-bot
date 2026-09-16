@@ -31,7 +31,7 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python3 antiage_bot.py
     disk:
-      name: data
+      name: antiage-data
       mountPath: /data
       sizeGB: 1
     envVars:
