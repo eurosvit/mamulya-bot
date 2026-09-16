@@ -205,6 +205,13 @@ def on_start(chat_id, arg):
     if not phone:
         DB.execute("insert or ignore into customers(chat_id,order_id,phone,stage,created,src) values(?, '', '', 'unknown', ?, ?)", (chat_id, time.time(), src))
         DB.execute("update customers set src=? where chat_id=? and coalesce(src,'')=''", (src, chat_id)); DB.commit()
+        if arg == "promo":
+            return send(chat_id, T["promo_intro"], [
+                [("🤰 Для себе — чекаю малюка", "promo:pregnant")],
+                [("🤱 Для себе — вже мама", "promo:mama")],
+                [("🎁 Купую на подарунок", "promo:gift")],
+                [("🏢 Від організації / установи", "promo:org")],
+                [("👀 Просто роздивляюсь", "promo:look")]])
         # без замовлення в посиланні — просимо підтвердити номер кнопкою Telegram
         return tg("sendMessage", chat_id=chat_id, parse_mode="HTML",
             text=T["ask_phone"],
@@ -344,6 +351,15 @@ def on_contact(chat_id, phone):
 def on_callback(cb):
     chat_id, data = cb["message"]["chat"]["id"], cb["data"]
     tg("answerCallbackQuery", callback_query_id=cb["id"])
+    if data.startswith("promo:"):
+        kind = data[6:]
+        stage = {"pregnant": "pregnant", "org": "b2b"}.get(kind, "unknown")
+        DB.execute("update customers set stage=? where chat_id=?", (stage, chat_id))
+        DB.execute("insert or ignore into sent values(?,?,?)", (chat_id, "promo0", time.time())); DB.commit()
+        send(chat_id, T["promo_code"], [[("Обрати на Mamulya.lviv", "https://mamulya.lviv.ua")]])
+        if kind == "mama":
+            send(chat_id, "І щоб підказувати корисне за віком: напишіть дату народження малюка (наприклад 15.03.2026) 😊")
+        return
     if data == "faq":
         row = DB.execute("select coalesce(store,'') from customers where chat_id=?", (chat_id,)).fetchone()
         store = row[0] if row else ""
@@ -394,6 +410,18 @@ def sync_orders(pages, limit=50):
 def cron():
     while True:
         now = time.time()
+        for chat_id, ts0 in DB.execute("select s.chat_id, s.ts from sent s where s.key='promo0'"):
+            cust = DB.execute("select phone, created from customers where chat_id=?", (chat_id,)).fetchone()
+            if not cust: continue
+            has_order = cust[0] and DB.execute("select 1 from orders where phone=? limit 1", (cust[0],)).fetchone()
+            if has_order: continue
+            for days, key, tkey in ((2, "promo_r1", "promo_r1"), (5, "promo_r2", "promo_r2")):
+                if now - (ts0 or 0) >= days * DAY and not DB.execute("select 1 from sent where chat_id=? and key=?", (chat_id, key)).fetchone():
+                    try:
+                        send(chat_id, T[tkey], [[("На Mamulya.lviv", "https://mamulya.lviv.ua")]])
+                        DB.execute("insert into sent values(?,?,?)", (chat_id, key, now))
+                    except Exception as e: print("promo_rem", e)
+        DB.commit()
         for chat_id, dob, cur_stage in DB.execute("select chat_id,dob,stage from customers where dob is not null and dob!='' and stage!='b2b'"):
             st = stage_from_dob(dob)
             if st and st != cur_stage:
