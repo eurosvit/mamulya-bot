@@ -355,7 +355,8 @@ def on_callback(cb):
         kind = data[6:]
         stage = {"pregnant": "pregnant", "org": "b2b"}.get(kind, "unknown")
         DB.execute("update customers set stage=? where chat_id=?", (stage, chat_id))
-        DB.execute("insert or ignore into sent values(?,?,?)", (chat_id, "promo0", time.time())); DB.commit()
+        DB.execute("insert or ignore into sent values(?,?,?)", (chat_id, "promo0", time.time()))
+        DB.execute("insert or ignore into sent values(?,?,?)", (chat_id, f"promoans:{kind}", time.time())); DB.commit()
         send(chat_id, T["promo_code"], [[("Обрати на Mamulya.lviv", "https://mamulya.lviv.ua")]])
         if kind == "mama":
             send(chat_id, "І щоб підказувати корисне за віком: напишіть дату народження малюка (наприклад 15.03.2026) 😊")
@@ -619,6 +620,18 @@ def admin_page():
     cptype = lambda pfx: (n(f"select count(*) from coupons where code like '{pfx}%'"), n(f"select count(*) from coupons where code like '{pfx}%' and expires>{now}"))
     mm_all, mm_live = cptype("MMBOT"); zn_all, zn_live = cptype("ZNBOT")
     cpn = q("select c.code, coalesce(nullif(cu.phone,''),c.chat_id), datetime(c.expires,'unixepoch','localtime'), c.expires>?, c.reminded from coupons c left join customers cu on cu.chat_id=c.chat_id order by c.expires desc limit 50", now)
+    pr_in = n("select count(*) from customers where src='promo'")
+    pr_ans = n("select count(*) from sent where key='promo0'")
+    ANS_UA = {"pregnant": "🤰 чекає малюка", "mama": "🤱 вже мама", "gift": "🎁 на подарунок", "org": "🏢 організація", "look": "👀 роздивляється"}
+    pr_answers = q("select substr(key,10), count(*) from sent where key like 'promoans:%' group by 1 order by 2 desc")
+    pr_bought = n("select count(*) from customers c where c.src='promo' and c.phone!='' and exists(select 1 from orders o where o.phone=c.phone)")
+    pr_r1 = n("select count(*) from sent where key='promo_r1'"); pr_r2 = n("select count(*) from sent where key='promo_r2'")
+    pr_rows = f"""<tr><td>Перейшли з попапа</td><td class=n>{pr_in}</td><td></td></tr>
+<tr><td>Відповіли на питання → LOVE7</td><td class=n>{pr_ans}</td><td class=n>{(pr_ans/pr_in*100 if pr_in else 0):.0f}%</td></tr>"""
+    for k, v in pr_answers:
+        pr_rows += f"<tr class=sub><td>{ANS_UA.get(k, k)}</td><td class=n>{v}</td><td class=n>{(v/pr_ans*100 if pr_ans else 0):.0f}%</td></tr>"
+    pr_rows += f"""<tr><td>Нагадувань про код (д2/д5)</td><td class=n>{pr_r1}/{pr_r2}</td><td></td></tr>
+<tr><td><b>Зробили перше замовлення</b></td><td class=n><b>{pr_bought}</b></td><td class=n><b>{(pr_bought/pr_in*100 if pr_in else 0):.0f}%</b></td></tr>"""
     cust = q("select c.chat_id, coalesce(nullif(c.phone,''),'—'), coalesce((select name from names nm where nm.phone=c.phone),'—'), c.stage, c.dob, datetime(c.created,'unixepoch','localtime'), (select count(*) from gifts g where g.chat_id=c.chat_id), coalesce(nullif(c.src,''),'—'), coalesce(nullif(c.store,''),'—') from customers c order by c.created desc limit 100")
     cards = [("Клієнтів у боті", nc), ("З номером", n("select count(*) from customers where phone!=''")),
              ("Замовлень у базі", n("select count(*) from orders")), ("Подарунків", n("select count(*) from gifts")),
@@ -696,6 +709,7 @@ details.p[open] summary{{margin-bottom:8px}}
 <div class=grid>
 {panel("Воронка · SMS → бот → подарунки", f"<table>{fun}</table>")}
 {panel("Звідки прийшли в бот", f"<table>{rows(srcs, SRC_UA)}</table>")}
+{panel("Попап −7% (велком-потік)", f"<table>{pr_rows}</table>")}
 {panel("По днях", f"<table><tr><th>Дата</th><th>Замовл.</th><th>У бот</th><th>Конв.</th></tr>{daily_rows}</table>", extra=" <small>останні 14 днів</small>")}
 {panel("Обрані подарунки", f"<table>{rows(gifts, GIFT_UA, pct_of=pickers or 1)}</table>", extra=f" <small>% від {pickers} з подарунками</small>")}
 {panel("Купони", f"<table>{coup_sum}</table>")}
