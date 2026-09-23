@@ -317,7 +317,16 @@ def on_text(chat_id, text):
             f"📦 Замовлень у базі: {n('select count(*) from orders')}")
     if chat_id in ADMINS and t == "/postold":
         n_ = DB.execute("select count(*) from legacy").fetchone()[0]
-        return send(chat_id, f"У списку старого бота: {n_} chat_id. Розсилка: /postold go — надішле міграційне повідомлення всім.")
+        lvl = near = 0
+        for (cid,) in DB.execute("select chat_id from legacy"):
+            row = DB.execute("select coalesce(phone,'') from legacy where chat_id=?", (cid,)).fetchone()
+            ph = norm_phone(row[0]) if row and row[0] else ""
+            if not ph: continue
+            total = DB.execute("select coalesce(sum(amount),0) from orders where phone=? and status not in (6,7,13,15,8)", (ph,)).fetchone()[0]
+            cur, nxt = level_of(total)
+            if cur: lvl += 1
+            elif nxt and total > 0 and (nxt[0] - total) <= 1500: near += 1
+        return send(chat_id, f"У списку старого бота: {n_}.\n💎 З рівнем (персональний текст про знижку): {lvl}\n📈 «За крок до рівня» (≤1500 ₴): {near}\n📨 Решта — загальний текст.\n\nЗапуск: /postold go")
     if chat_id in ADMINS and t == "/postold go":
         if not OLD_TOKEN: return send(chat_id, "OLD_BOT_TOKEN не заданий на Render")
         ok = bad = 0
@@ -415,13 +424,36 @@ MIGRATE_TEXT = ("<b>Великі новини від Mamulya! 🎉</b>\n\n"
     "🤱 <b>Підказки за віком малюка</b> — що знадобиться саме на вашому етапі\n\n"
     "Цей бот більше не оновлюється. Переходьте за хвилинку — ваші накопичення чекають 👇")
 
+WHATS_NEW = ("Що нового в помічнику:\n"
+    "🎁 <b>Подарунки за кожне замовлення</b> — Dila −20% на аналізи, купони, безкоштовна доставка\n"
+    "🤱 <b>Підказки за віком малюка</b> — що знадобиться саме на вашому етапі\n"
+    "🛍 Одна програма на всі магазини: Mamulya, Modnamama, Znana Mama, Lipoland")
+
 def tg_old(method, **kw):
     req = urllib.request.Request(f"https://api.telegram.org/bot{OLD_TOKEN}/" + method, json.dumps(kw).encode(), {"Content-Type": "application/json"})
     return json.load(urllib.request.urlopen(req, timeout=30))
 
+def legacy_text(chat_id):
+    row = DB.execute("select coalesce(phone,''), coalesce(name,'') from legacy where chat_id=?", (chat_id,)).fetchone()
+    ph, name = (norm_phone(row[0]) if row and row[0] else "", row[1] if row else "")
+    hello = (name.split()[0] + ", в") if name else "В"
+    if ph:
+        total = DB.execute("select coalesce(sum(amount),0) from orders where phone=? and status not in (6,7,13,15,8)", (ph,)).fetchone()[0]
+        cur, nxt = level_of(total)
+        t = f"{total:,.0f}".replace(",", " ")
+        if cur:
+            return (f"<b>{hello}ас чекає приємний сюрприз 💎</b>\n\n"
+                f"Ваші покупки в наших магазинах — уже <b>{t} ₴</b>, і у вас є <b>постійна знижка {cur[1]}%</b> (рівень «{cur[2]}»). Так, вона вже діє — можливо, ви й не знали!\n\n"
+                f"Ми переїхали в нового помічника — там ваш баланс, знижка і подарунки 💗\n\n{WHATS_NEW}\n\nПеревірте свій баланс 👇")
+        if nxt and total > 0 and (nxt[0] - total) <= 1500:
+            need = f"{nxt[0]-total:,.0f}".replace(",", " ")
+            return (f"<b>{hello}и за крок від постійної знижки! 💎</b>\n\n"
+                f"Ваші покупки — вже <b>{t} ₴</b>. До знижки <b>{nxt[1]}% назавжди</b> лишилось всього <b>{need} ₴</b>.\n\n" + MIGRATE_TEXT)
+    return MIGRATE_TEXT
+
 def old_reply(chat_id):
-    tg_old("sendMessage", chat_id=chat_id, text=MIGRATE_TEXT, parse_mode="HTML",
-           reply_markup={"inline_keyboard": [[{"text": "💗 Перейти в новий бот", "url": "https://t.me/mamulyalvivbot?start=migrate"}]]})
+    tg_old("sendMessage", chat_id=chat_id, text=legacy_text(chat_id), parse_mode="HTML", disable_web_page_preview=True,
+           reply_markup={"inline_keyboard": [[{"text": "💎 Перевірити мій баланс", "url": "https://t.me/mamulyalvivbot?start=migrate"}]]})
 
 def poll_old():
     try: tg_old("deleteWebhook")  # знести вебхук SendPulse, інакше getUpdates дає 409
