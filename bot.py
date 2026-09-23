@@ -317,7 +317,7 @@ def on_text(chat_id, text):
             f"📦 Замовлень у базі: {n('select count(*) from orders')}")
     if chat_id in ADMINS and t == "/postold":
         n_ = DB.execute("select count(*) from legacy").fetchone()[0]
-        lvl = near = 0
+        lvl = near = zero = 0
         for (cid,) in DB.execute("select chat_id from legacy"):
             row = DB.execute("select coalesce(phone,'') from legacy where chat_id=?", (cid,)).fetchone()
             ph = norm_phone(row[0]) if row and row[0] else ""
@@ -325,8 +325,9 @@ def on_text(chat_id, text):
             total = DB.execute("select coalesce(sum(amount),0) from orders where phone=? and status not in (6,7,13,15,8)", (ph,)).fetchone()[0]
             cur, nxt = level_of(total)
             if cur: lvl += 1
-            elif nxt and total > 0 and (nxt[0] - total) <= 1500: near += 1
-        return send(chat_id, f"У списку старого бота: {n_}.\n💎 З рівнем (персональний текст про знижку): {lvl}\n📈 «За крок до рівня» (≤1500 ₴): {near}\n📨 Решта — загальний текст.\n\nЗапуск: /postold go")
+            elif total == 0: zero += 1
+            elif nxt and (nxt[0] - total) <= 1500: near += 1
+        return send(chat_id, f"У списку старого бота: {n_}.\n💎 З рівнем (персональний текст про знижку): {lvl}\n📈 «За крок до рівня» (≤1500 ₴): {near}\n🌱 Без покупок — текст із LOVE7 на першу: {zero}\n📨 Решта (без телефону) — загальний текст.\n\nЗапуск: /postold go")
     if chat_id in ADMINS and t == "/postold go":
         if not OLD_TOKEN: return send(chat_id, "OLD_BOT_TOKEN не заданий на Render")
         ok = bad = 0
@@ -453,6 +454,10 @@ def legacy_text(chat_id):
             return (f"<b>{hello}ас чекає приємний сюрприз 💎</b>\n\n"
                 f"Ваші покупки в наших магазинах — уже <b>{t} ₴</b>, і у вас є <b>постійна знижка {cur[1]}%</b> (рівень «{cur[2]}»). Так, вона вже діє — можливо, ви й не знали!\n\n"
                 f"Ми переїхали в нового помічника — там ваш баланс, знижка і подарунки 💗\n\n{WHATS_NEW}\n\nПеревірте свій баланс 👇")
+        if total == 0:
+            return (f"<b>Ваша знижка на першу покупку досі чекає 💗</b>\n\n"
+                f"Промокод <code>LOVE7</code> (−7%) діє на першу покупку в Mamulya.lviv — а тепер у нас ще більше причин ним скористатись:\n\n{WHATS_NEW}\n\n"
+                "Ми переїхали в нового помічника — там промокод, подарунки і все найкорисніше 👇")
         if nxt and total > 0 and (nxt[0] - total) <= 1500:
             need = f"{nxt[0]-total:,.0f}".replace(",", " ")
             return (f"<b>{hello}и за крок від постійної знижки! 💎</b>\n\n"
