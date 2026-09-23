@@ -102,6 +102,30 @@ def fetch_order(order_id):
 STORES = {94: "Mamulya.lviv", 97: "Mamulya.lviv", 134: "Mamulya.lviv", 120: "Modnamama", 150: "Modnamama", 157: "Modnamama", 164: "Znana Mama", 22: "AntiAge"}
 # ponytail: рахуємо все живе одразу; DECLINED/Повернення/Скасований/TEST/Видалений випадають самі при зміні статусу (вебхук)
 
+BOT_COUPONS = ("FREESHIP", "MAMA150", "MMBOT", "ZNBOT", "FRIEND300", "LOVE7")
+
+def coupon_in(o):
+    blob = (str(o.get("comment") or "") + " " + str(o.get("certificate") or "")).upper()
+    return next((c for c in BOT_COUPONS if c in blob), None)
+
+def abuse_check(o):
+    # ponytail: детекція, не блокування — рішення за менеджером
+    try:
+        oid = str(o.get("id")); code = coupon_in(o)
+        c0 = (o.get("contacts") or [{}])[0] if isinstance(o.get("contacts"), list) else {}
+        phone = norm_phone((c0.get("phone") or [""])[0] if c0 else "")
+        if not phone: return
+        if code:
+            prev = DB.execute("select order_id, status from orders where phone=? and order_id!=? and status in (1,2,3,4,10,11) order by ts desc limit 1", (phone, oid)).fetchone()
+            if prev:
+                for a in ADMINS: send(a, f"⚠️ <b>Підозра на обхід подарунків</b>\nЗамовлення №{oid} використовує купон <code>{code}</code>, а попереднє №{prev[0]} того ж телефону ({phone}) ще НЕ отримане.\nПеревірте при підтвердженні: купон діє на наступне замовлення після отримання першого.")
+        if int(o.get("statusId") or 0) in (6, 13):
+            used = DB.execute("select order_id from orders where phone=? and order_id!=?", (phone, oid)).fetchall()
+            row = DB.execute("select 1 from orders where order_id=? and status not in (6,7,13,15,8)", (oid,)).fetchone()
+            if row and used and coupon_in(o) is None:
+                pass  # скасування без купона — не сигнал
+    except Exception as e: print("abuse", e)
+
 def save_order(o, names=None):
     c0 = (o.get("contacts") or [{}])[0] if isinstance(o.get("contacts"), list) else {}
     phone = norm_phone((c0.get("phone") or [""])[0] if c0 else o.get("phone", ""))
@@ -454,7 +478,18 @@ class Hook(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or b"{}"))
         o = body.get("data", body)
         if isinstance(o, list): o = o[0]
+        prev_status = (DB.execute("select status from orders where order_id=?", (str(o.get("id")),)).fetchone() or [None])[0]
         save_order(o, product_names(body))
+        abuse_check(o)
+        # скасували замовлення, з якого клієнт уже взяв подарунки → алерт
+        try:
+            if int(o.get("statusId") or 0) in (6, 13) and prev_status not in (6, 13):
+                cid_row = DB.execute("select chat_id from customers where order_id=?", (str(o.get("id")),)).fetchone()
+                if cid_row:
+                    g = DB.execute("select count(*) from gifts where chat_id=?", (cid_row[0],)).fetchone()[0]
+                    if g:
+                        for a in ADMINS: send(a, f"⚠️ <b>Скасовано замовлення №{o.get('id')}</b>, з якого клієнт уже забрав {g} подарунк(и) в боті. Гляньте картку клієнта в кабінеті.")
+        except Exception as e: print("cancel-alert", e)
         self.send_response(200); self.end_headers()
     def do_GET(self):
         from urllib.parse import urlparse, parse_qs
