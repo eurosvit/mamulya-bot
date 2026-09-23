@@ -391,6 +391,14 @@ def on_contact(chat_id, phone):
     if DB.execute("select 1 from b2b where phone=?", (ph,)).fetchone(): stage = "b2b"
     DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created,store) values(?,?,?,?,?,?)", (chat_id, row[0], ph, stage, time.time(), row[2] or "")); DB.commit()
     send(chat_id, T["order_found"].format(order_id=row[0], item=items[0][:60]) if items else T["order_missing"])
+    src_row = DB.execute("select coalesce(src,'') from customers where chat_id=?", (chat_id,)).fetchone()
+    if src_row and src_row[0] == "migrate":
+        total = DB.execute("select coalesce(sum(amount),0) from orders where phone=? and status not in (6,7,13,15,8)", (ph,)).fetchone()[0]
+        cur, nxt = level_of(total)
+        t = f"{total:,.0f}".replace(",", " ")
+        msg = f"💎 Ваш баланс: <b>{t} ₴</b>\n"
+        msg += f"Рівень: <b>{cur[2]}</b> — постійна знижка <b>{cur[1]}%</b> діє на всі покупки!" if cur else (f"До знижки {nxt[1]}% лишилось {nxt[0]-total:,.0f} ₴".replace(",", " ") if nxt else "")
+        send(chat_id, msg)
     show_menu(chat_id, stage)
 
 def on_callback(cb):
