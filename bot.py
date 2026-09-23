@@ -332,9 +332,12 @@ def on_text(chat_id, text):
         if not OLD_TOKEN: return send(chat_id, "OLD_BOT_TOKEN не заданий на Render")
         ok = bad = 0
         for (cid,) in DB.execute("select chat_id from legacy"):
-            try: old_reply(cid); ok += 1
+            try:
+                old_reply(cid); ok += 1
+                DB.execute("insert or ignore into sent values(?,?,?)", (cid, "mig1", time.time()))
             except Exception: bad += 1
             time.sleep(0.05)  # ~20 msg/s — під ліміт Telegram
+        DB.commit()
         return send(chat_id, f"Міграційна розсилка: доставлено {ok}, недоступні {bad} (заблокували бота — це нормально)")
     if chat_id in ADMINS and t.startswith("/b2b "):
         ph = norm_phone(t.split()[1])
@@ -751,6 +754,18 @@ def admin_page():
         o, e = daily_o.get(d, 0), daily_e.get(d, 0)
         c = f"{e/o*100:.0f}%" if o else "—"
         daily_rows += f"<tr><td>{d[8:10]}.{d[5:7]}</td><td class=n>{o}</td><td class=n>{e}</td><td class=n>{c}</td></tr>"
+    mg_total = n("select count(*) from legacy")
+    mg_sent = n("select count(*) from sent where key='mig1'")
+    mg_in = n("select count(*) from legacy l where exists(select 1 from customers c where c.chat_id=l.chat_id)")
+    mg_phone = n("select count(*) from legacy l where exists(select 1 from customers c where c.chat_id=l.chat_id and c.phone!='')")
+    mg_gift = n("select count(*) from legacy l where exists(select 1 from gifts g where g.chat_id=l.chat_id)")
+    def mrow(label, v, base):
+        return f"<tr><td>{label}</td><td class=n>{v}</td><td class=n>{(v/base*100 if base else 0):.0f}%</td></tr>"
+    mg_rows = (f"<tr><td>У списку старого бота</td><td class=n>{mg_total}</td><td></td></tr>"
+        + mrow("Розсилку доставлено", mg_sent, mg_total)
+        + mrow("Перейшли в новий бот", mg_in, mg_sent or mg_total)
+        + mrow("Підтвердили номер", mg_phone, mg_in or 1)
+        + mrow("Взяли подарунок", mg_gift, mg_in or 1))
     stages = q("select stage,count(*) from customers group by stage order by 2 desc")
     stores = q("select coalesce(nullif(store,''),'інше'), count(*) from orders group by 1 order by 2 desc")
     srcs = q("select coalesce(nullif(src,''),'—'), count(*) from customers group by 1 order by 2 desc")
@@ -853,6 +868,7 @@ details.p[open] summary{{margin-bottom:8px}}
 <div class=grid>
 {panel("Воронка · SMS → бот → подарунки", f"<table>{fun}</table>")}
 {panel("Звідки прийшли в бот", f"<table>{rows(srcs, SRC_UA)}</table>")}
+{panel("Міграція зі старого бота", f"<table>{mg_rows}</table>")}
 {panel("Попап −7% (велком-потік)", f"<table>{pr_rows}</table>")}
 {panel("По днях", f"<table><tr><th>Дата</th><th>Замовл.</th><th>У бот</th><th>Конв.</th></tr>{daily_rows}</table>", extra=" <small>останні 14 днів</small>")}
 {panel("Обрані подарунки", f"<table>{rows(gifts, GIFT_UA, pct_of=pickers or 1)}</table>", extra=f" <small>% від {pickers} з подарунками</small>")}
