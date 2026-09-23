@@ -18,6 +18,7 @@ create table if not exists gifts(chat_id int, gift text, ts real);
 create table if not exists coupons(code text primary key, chat_id int, expires real, reminded int default 0);
 create table if not exists sent(chat_id int, key text, ts real, primary key(chat_id,key));
 create table if not exists posts(id integer primary key autoincrement, ts real, target text, text text);
+create table if not exists legacy(chat_id integer primary key, name text, phone text, added real);
 create table if not exists pool(code text primary key, chat_id int, ts real);
 create table if not exists names(phone text primary key, name text);
 create table if not exists b2b(phone text primary key);
@@ -314,6 +315,17 @@ def on_text(chat_id, text):
             f"🎟 Активних купонів: {live}\n"
             f"🎟 Вільних кодів −150: {n('select count(*) from pool where chat_id is null')}\n"
             f"📦 Замовлень у базі: {n('select count(*) from orders')}")
+    if chat_id in ADMINS and t == "/postold":
+        n_ = DB.execute("select count(*) from legacy").fetchone()[0]
+        return send(chat_id, f"У списку старого бота: {n_} chat_id. Розсилка: /postold go — надішле міграційне повідомлення всім.")
+    if chat_id in ADMINS and t == "/postold go":
+        if not OLD_TOKEN: return send(chat_id, "OLD_BOT_TOKEN не заданий на Render")
+        ok = bad = 0
+        for (cid,) in DB.execute("select chat_id from legacy"):
+            try: old_reply(cid); ok += 1
+            except Exception: bad += 1
+            time.sleep(0.05)  # ~20 msg/s — під ліміт Telegram
+        return send(chat_id, f"Міграційна розсилка: доставлено {ok}, недоступні {bad} (заблокували бота — це нормально)")
     if chat_id in ADMINS and t.startswith("/b2b "):
         ph = norm_phone(t.split()[1])
         if DB.execute("select 1 from b2b where phone=?", (ph,)).fetchone():
@@ -393,6 +405,34 @@ def on_callback(cb):
         give(chat_id, data[5:])
         stage = DB.execute("select stage from customers where chat_id=?", (chat_id,)).fetchone()[0]
         show_menu(chat_id, stage)
+
+OLD_TOKEN = os.environ.get("OLD_BOT_TOKEN", "")
+MIGRATE_TEXT = ("Ми переїхали! 🎉\n\nЦей бот більше не оновлюється. Все найкорисніше тепер у новому помічнику:\n"
+    "🎁 подарунки за кожне замовлення\n💎 ваш рівень знижки в усіх наших магазинах\n🤱 підказки за віком малюка\n\n"
+    "Переходьте — це хвилинка, і все ваше збережеться:")
+
+def tg_old(method, **kw):
+    req = urllib.request.Request(f"https://api.telegram.org/bot{OLD_TOKEN}/" + method, json.dumps(kw).encode(), {"Content-Type": "application/json"})
+    return json.load(urllib.request.urlopen(req, timeout=30))
+
+def old_reply(chat_id):
+    tg_old("sendMessage", chat_id=chat_id, text=MIGRATE_TEXT, parse_mode="HTML",
+           reply_markup={"inline_keyboard": [[{"text": "💗 Перейти в новий бот", "url": "https://t.me/mamulyalvivbot?start=migrate"}]]})
+
+def poll_old():
+    offset = 0
+    while True:
+        try:
+            for u in tg_old("getUpdates", offset=offset, timeout=50)["result"]:
+                offset = u["update_id"] + 1
+                m = u.get("message") or {}
+                cid = (m.get("chat") or {}).get("id")
+                if cid:
+                    DB.execute("insert or ignore into legacy(chat_id, name, added) values(?,?,?)", (cid, (m.get("chat") or {}).get("first_name", ""), time.time())); DB.commit()
+                    try: old_reply(cid)
+                    except Exception as e: print("old_reply", e)
+        except Exception as e:
+            print("poll_old", e); time.sleep(10)
 
 def poll():
     offset = 0
@@ -491,6 +531,23 @@ class Hook(BaseHTTPRequestHandler):
                         for a in ADMINS: send(a, f"⚠️ <b>Скасовано замовлення №{o.get('id')}</b>, з якого клієнт уже забрав {g} подарунк(и) в боті. Гляньте картку клієнта в кабінеті.")
         except Exception as e: print("cancel-alert", e)
         self.send_response(200); self.end_headers()
+    def do_PUT(self):
+        from urllib.parse import urlparse, parse_qs
+        u = urlparse(self.path)
+        if u.path == "/legacy" and parse_qs(u.query).get("key", [""])[0] == os.environ.get("ADMIN_KEY", ""):
+            body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8", "ignore")
+            n_ = 0
+            for line in body.splitlines():
+                parts = [p.strip().strip('"') for p in line.replace(";", ",").split(",")]
+                ids = [p for p in parts if p.isdigit() and 6 <= len(p) <= 12]
+                if ids:
+                    name = next((p for p in parts if p and not p.isdigit()), "")
+                    ph = next((p for p in parts if p.isdigit() and len(p) >= 10 and p.startswith(("38", "0"))), "")
+                    DB.execute("insert or ignore into legacy(chat_id, name, phone, added) values(?,?,?,?)", (int(ids[0]), name[:60], ph, time.time())); n_ += 1
+            DB.commit()
+            self.send_response(200); self.end_headers(); self.wfile.write(f"imported {n_}".encode()); return
+        self.send_response(404); self.end_headers()
+
     def do_GET(self):
         from urllib.parse import urlparse, parse_qs
         u = urlparse(self.path)
@@ -762,5 +819,6 @@ details.p[open] summary{{margin-bottom:8px}}
 
 if __name__ == "__main__":
     threading.Thread(target=poll, daemon=True).start()
+    if OLD_TOKEN: threading.Thread(target=poll_old, daemon=True).start()
     threading.Thread(target=cron, daemon=True).start()
     HTTPServer(("0.0.0.0", int(os.environ.get("PORT", 8080))), Hook).serve_forever()
