@@ -442,7 +442,7 @@ def tg_old(method, **kw):
     req = urllib.request.Request(f"https://api.telegram.org/bot{OLD_TOKEN}/" + method, json.dumps(kw).encode(), {"Content-Type": "application/json"})
     return json.load(urllib.request.urlopen(req, timeout=30))
 
-def legacy_text(chat_id):
+def legacy_text(chat_id):  # -> (text, button_label)
     row = DB.execute("select coalesce(phone,''), coalesce(name,'') from legacy where chat_id=?", (chat_id,)).fetchone()
     ph, name = (norm_phone(row[0]) if row and row[0] else "", row[1] if row else "")
     hello = (name.split()[0] + ", в") if name else "В"
@@ -451,22 +451,23 @@ def legacy_text(chat_id):
         cur, nxt = level_of(total)
         t = f"{total:,.0f}".replace(",", " ")
         if cur:
-            return (f"<b>{hello}ас чекає приємний сюрприз 💎</b>\n\n"
+            return ((f"<b>{hello}ас чекає приємний сюрприз 💎</b>\n\n"
                 f"Ваші покупки в наших магазинах — уже <b>{t} ₴</b>, і у вас є <b>постійна знижка {cur[1]}%</b> (рівень «{cur[2]}»). Так, вона вже діє — можливо, ви й не знали!\n\n"
-                f"Ми переїхали в нового помічника — там ваш баланс, знижка і подарунки 💗\n\n{WHATS_NEW}\n\nПеревірте свій баланс 👇")
+                f"Ми переїхали в нового помічника — там ваш баланс, знижка і подарунки 💗\n\n{WHATS_NEW}\n\nПеревірте свій баланс 👇"), "💎 Перевірити мій баланс")
         if total == 0:
-            return (f"<b>Ваша знижка на першу покупку досі чекає 💗</b>\n\n"
+            return ((f"<b>Ваша знижка на першу покупку досі чекає 💗</b>\n\n"
                 f"Промокод <code>LOVE7</code> (−7%) діє на першу покупку в Mamulya.lviv — а тепер у нас ще більше причин ним скористатись:\n\n{WHATS_NEW}\n\n"
-                "Ми переїхали в нового помічника — там промокод, подарунки і все найкорисніше 👇")
+                "Ми переїхали в нового помічника — там промокод, подарунки і все найкорисніше 👇"), "💗 Забрати знижку −7%")
         if nxt and total > 0 and (nxt[0] - total) <= 1500:
             need = f"{nxt[0]-total:,.0f}".replace(",", " ")
-            return (f"<b>{hello}и за крок від постійної знижки! 💎</b>\n\n"
-                f"Ваші покупки — вже <b>{t} ₴</b>. До знижки <b>{nxt[1]}% назавжди</b> лишилось всього <b>{need} ₴</b>.\n\n" + MIGRATE_TEXT)
-    return MIGRATE_TEXT
+            return ((f"<b>{hello}и за крок від постійної знижки! 💎</b>\n\n"
+                f"Ваші покупки — вже <b>{t} ₴</b>. До знижки <b>{nxt[1]}% назавжди</b> лишилось всього <b>{need} ₴</b>.\n\n" + MIGRATE_TEXT), "💎 Перевірити мій баланс")
+    return (MIGRATE_TEXT, "💗 Перейти в новий бот")
 
 def old_reply(chat_id):
-    tg_old("sendMessage", chat_id=chat_id, text=legacy_text(chat_id), parse_mode="HTML", disable_web_page_preview=True,
-           reply_markup={"inline_keyboard": [[{"text": "💎 Перевірити мій баланс", "url": "https://t.me/mamulyalvivbot?start=migrate"}]]})
+    text, label = legacy_text(chat_id)
+    tg_old("sendMessage", chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True,
+           reply_markup={"inline_keyboard": [[{"text": label, "url": "https://t.me/mamulyalvivbot?start=migrate"}]]})
 
 def poll_old():
     try: tg_old("deleteWebhook")  # знести вебхук SendPulse, інакше getUpdates дає 409
