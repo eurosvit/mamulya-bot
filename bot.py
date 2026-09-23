@@ -420,6 +420,8 @@ def old_reply(chat_id):
            reply_markup={"inline_keyboard": [[{"text": "💗 Перейти в новий бот", "url": "https://t.me/mamulyalvivbot?start=migrate"}]]})
 
 def poll_old():
+    try: tg_old("deleteWebhook")  # знести вебхук SendPulse, інакше getUpdates дає 409
+    except Exception as e: print("old_webhook", e)
     offset = 0
     while True:
         try:
