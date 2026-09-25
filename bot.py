@@ -194,6 +194,9 @@ def send_support(chat_id):
            [{"text": "💚 WhatsApp", "url": "https://wa.me/380636324010"}],
            [{"text": "❓ Часті питання", "callback_data": "faq"}]]})
 
+def has_sold(phone):
+    return bool(phone) and bool(DB.execute("select 1 from orders where phone=? and status=5 limit 1", (phone,)).fetchone())
+
 def level_of(total):
     lvls = [(25000, 10, "Діамант 💎"), (15000, 7, "VIP 👑"), (9000, 5, "Смарт 🧠"), (4500, 3, "Базовий 💙")]
     cur = next(((t, p, n) for t, p, n in lvls if total >= t), None)
@@ -246,17 +249,21 @@ def on_start(chat_id, arg):
     old = DB.execute("select order_id, coalesce(bonus,0) from customers where chat_id=?", (chat_id,)).fetchone()
     if old and old[0] and old[0] != arg:
         # повторне замовлення: +1 вибір, купонні подарунки знову доступні (буде новий код)
-        DB.execute("update customers set order_id=?, phone=?, stage=?, created=?, store=?, bonus=? where chat_id=?",
-                   (arg, phone, stage, time.time(), store, old[1] + 1, chat_id))
-        DB.execute("delete from gifts where chat_id=? and gift in ('coupon','znana10')", (chat_id,)); DB.commit()
+        DB.execute("update customers set order_id=?, phone=?, stage=?, created=?, store=? where chat_id=?",
+                   (arg, phone, stage, time.time(), store, chat_id)); DB.commit()
         total = DB.execute("select coalesce(sum(amount),0) from orders where phone=? and status not in (6,7,13,15,8)", (phone,)).fetchone()[0]
         cur, nxt = level_of(total)
         lvl = f"рівень {cur[2]}, ваша постійна знижка {cur[1]}%" if cur else (f"до знижки {nxt[1]}% лишилось {nxt[0]-total:,.0f} ₴".replace(",", " ") if nxt else "")
         send(chat_id, T["welcome_repeat"].format(store=store or "нашому магазині", total=f"{total:,.0f}".replace(",", " "), lvl=lvl))
-        return show_menu(chat_id, stage)
+        return send(chat_id, T["gate_repeat"])
     DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created,store,src) values(?,?,?,?,?,?,?)", (chat_id, arg, phone, stage, time.time(), store, src)); DB.commit()
     send(chat_id, T["welcome_store"].format(store=store) if store else T["welcome"])
-    show_menu(chat_id, stage)
+    if has_sold(phone):
+        show_menu(chat_id, stage)
+    else:
+        send(chat_id, T["gate_first"])
+        if stage in ("pregnant", "unknown"):
+            send(chat_id, T["ask_dob"])
 
 ADMINS = {int(x) for x in os.environ.get("ADMIN_IDS", "").split(",") if x}
 
@@ -272,8 +279,13 @@ def stage_from_dob(dob):
 def on_text(chat_id, text):
     t = text.strip()
     if t == "🎁 Подарунки":
-        row = DB.execute("select stage from customers where chat_id=?", (chat_id,)).fetchone()
-        return show_menu(chat_id, row[0] if row else "unknown")
+        row = DB.execute("select stage, coalesce(phone,'') from customers where chat_id=?", (chat_id,)).fetchone()
+        if not row or not row[1]:
+            return send(chat_id, T["gate_nobuy"])
+        if not has_sold(row[1]):
+            has_any = DB.execute("select 1 from orders where phone=? and status not in (6,7,13,15,8) limit 1", (row[1],)).fetchone()
+            return send(chat_id, T["gate_button"] if has_any else T["gate_nobuy"])
+        return show_menu(chat_id, row[0])
     if t == "🎟 Мої купони":
         rows = DB.execute("select code,expires from coupons where chat_id=? and expires>?", (chat_id, time.time())).fetchall()
         rows += DB.execute("select code,ts+30*86400 from pool where chat_id=?", (chat_id,)).fetchall()
@@ -390,7 +402,7 @@ def on_contact(chat_id, phone):
     if not row:
         DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created) values(?,?,?,?,?)", (chat_id, "", ph, "unknown", time.time())); DB.commit()
         send(chat_id, T["order_missing"])
-        return show_menu(chat_id, "unknown")
+        return send(chat_id, T["gate_nobuy"])
     items = json.loads(row[1]); stage = infer_stage(items)
     if DB.execute("select 1 from b2b where phone=?", (ph,)).fetchone(): stage = "b2b"
     DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created,store) values(?,?,?,?,?,?)", (chat_id, row[0], ph, stage, time.time(), row[2] or "")); DB.commit()
@@ -403,7 +415,8 @@ def on_contact(chat_id, phone):
         msg = f"💎 Ваш баланс: <b>{t} ₴</b>\n"
         msg += f"Рівень: <b>{cur[2]}</b> — постійна знижка <b>{cur[1]}%</b> діє на всі покупки!" if cur else (f"До знижки {nxt[1]}% лишилось {nxt[0]-total:,.0f} ₴".replace(",", " ") if nxt else "")
         send(chat_id, msg)
-    show_menu(chat_id, stage)
+    if has_sold(ph): show_menu(chat_id, stage)
+    else: send(chat_id, T["gate_first"])
 
 def on_callback(cb):
     chat_id, data = cb["message"]["chat"]["id"], cb["data"]
@@ -576,6 +589,24 @@ class Hook(BaseHTTPRequestHandler):
         prev_status = (DB.execute("select status from orders where order_id=?", (str(o.get("id")),)).fetchone() or [None])[0]
         save_order(o, product_names(body))
         abuse_check(o)
+        # замовлення отримано (SOLD) → відкриваємо подарунки
+        try:
+            if int(o.get("statusId") or 0) == 5 and prev_status != 5:
+                c0 = (o.get("contacts") or [{}])[0] if isinstance(o.get("contacts"), list) else {}
+                ph_ = norm_phone((c0.get("phone") or [""])[0] if c0 else "")
+                if ph_:
+                    sold_cnt = DB.execute("select count(*) from orders where phone=? and status=5", (ph_,)).fetchone()[0]
+                    for (cid_,) in DB.execute("select chat_id from customers where phone=?", (ph_,)):
+                        limit_ = 2 + (DB.execute("select coalesce(bonus,0) from customers where chat_id=?", (cid_,)).fetchone() or [0])[0]
+                        picked_ = DB.execute("select count(*) from gifts where chat_id=?", (cid_,)).fetchone()[0]
+                        st_ = (DB.execute("select stage from customers where chat_id=?", (cid_,)).fetchone() or ["unknown"])[0]
+                        if picked_ < limit_:
+                            send(cid_, T["sold_open"]); show_menu(cid_, st_)
+                        elif sold_cnt > 1:
+                            DB.execute("update customers set bonus=coalesce(bonus,0)+1 where chat_id=?", (cid_,))
+                            DB.execute("delete from gifts where chat_id=? and gift in ('coupon','znana10')", (cid_,)); DB.commit()
+                            send(cid_, T["sold_open"]); show_menu(cid_, st_)
+        except Exception as e: print("sold-open", e)
         # скасували замовлення, з якого клієнт уже взяв подарунки → алерт
         try:
             if int(o.get("statusId") or 0) in (6, 13) and prev_status not in (6, 13):
