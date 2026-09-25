@@ -227,7 +227,7 @@ def show_menu(chat_id, stage):
 def on_start(chat_id, arg):
     if arg.startswith("ref"):
         DB.execute("insert or ignore into customers(chat_id,order_id,phone,stage,created) values(?,?,?,?,?)", (chat_id, arg, "", "unknown", time.time())); DB.commit()
-        return send(chat_id, T["ref_welcome"], [[("Mamulya", "https://mamulya.lviv.ua"), ("Modnamama −300 ₴", "https://modnamama.ua/?c=FRIEND300")]])
+        return send(chat_id, T["ref_welcome"], [[("Mamulya", "https://mamulya.lviv.ua"), ("Modnamama −300 грн", "https://modnamama.ua/?c=FRIEND300")]])
     src = "sms" if arg.isdigit() else (arg or "direct")  # sms / qr / web / migrate / direct
     phone, items, store = fetch_order(arg) if arg.isdigit() else (None, [], "")
     if not phone:
@@ -253,7 +253,7 @@ def on_start(chat_id, arg):
                    (arg, phone, stage, time.time(), store, chat_id)); DB.commit()
         total = DB.execute("select coalesce(sum(amount),0) from orders where phone=? and status not in (6,7,13,15,8)", (phone,)).fetchone()[0]
         cur, nxt = level_of(total)
-        lvl = f"рівень {cur[2]}, ваша постійна знижка {cur[1]}%" if cur else (f"до знижки {nxt[1]}% лишилось {nxt[0]-total:,.0f} ₴".replace(",", " ") if nxt else "")
+        lvl = f"рівень {cur[2]}, ваша постійна знижка {cur[1]}%" if cur else (f"до знижки {nxt[1]}% лишилось {nxt[0]-total:,.0f} грн".replace(",", " ") if nxt else "")
         send(chat_id, T["welcome_repeat"].format(store=store or "нашому магазині", total=f"{total:,.0f}".replace(",", " "), lvl=lvl))
         return send(chat_id, T["gate_repeat"])
     DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created,store,src) values(?,?,?,?,?,?,?)", (chat_id, arg, phone, stage, time.time(), store, src)); DB.commit()
@@ -297,9 +297,9 @@ def on_text(chat_id, text):
         # ponytail: сума всіх замовлень без фільтра статусу — скасовані завищать; уточнимо, коли зберігатимемо статус
         total = DB.execute("select coalesce(sum(amount),0) from orders where phone=? and status not in (6,7,13,15,8)", (row[0],)).fetchone()[0]
         cur, nxt = level_of(total)
-        msg = f"💎 Ваші покупки в наших магазинах разом: <b>{total:,.0f} ₴</b>\n".replace(",", " ")
+        msg = f"💎 Ваші покупки в наших магазинах разом: <b>{total:,.0f} грн</b>\n".replace(",", " ")
         msg += f"Рівень: <b>{cur[2]}</b> — постійна знижка {cur[1]}%\n" if cur else "Рівень: на старті програми 🚀\n"
-        if nxt: msg += f"До рівня «{nxt[2]}» ({nxt[1]}%) лишилось {nxt[0]-total:,.0f} ₴".replace(",", " ")
+        if nxt: msg += f"До рівня «{nxt[2]}» ({nxt[1]}%) лишилось {nxt[0]-total:,.0f} грн".replace(",", " ")
         else: msg += "Це максимальний рівень — вітаємо! 🎉"
         return send(chat_id, msg)
     if t == "🛍 Добірка для малюка":
@@ -339,7 +339,7 @@ def on_text(chat_id, text):
             if cur: lvl += 1
             elif total == 0: zero += 1
             elif nxt and (nxt[0] - total) <= 1500: near += 1
-        return send(chat_id, f"У списку старого бота: {n_}.\n💎 З рівнем (персональний текст про знижку): {lvl}\n📈 «За крок до рівня» (≤1500 ₴): {near}\n🌱 Без покупок — текст із LOVE7 на першу: {zero}\n📨 Решта (без телефону) — загальний текст.\n\nЗапуск: /postold go")
+        return send(chat_id, f"У списку старого бота: {n_}.\n💎 З рівнем (персональний текст про знижку): {lvl}\n📈 «За крок до рівня» (≤1500 грн): {near}\n🌱 Без покупок — текст із LOVE7 на першу: {zero}\n📨 Решта (без телефону) — загальний текст.\n\nЗапуск: /postold go")
     if chat_id in ADMINS and t == "/postold go":
         if not OLD_TOKEN: return send(chat_id, "OLD_BOT_TOKEN не заданий на Render")
         ok = bad = 0
@@ -412,8 +412,8 @@ def on_contact(chat_id, phone):
         total = DB.execute("select coalesce(sum(amount),0) from orders where phone=? and status not in (6,7,13,15,8)", (ph,)).fetchone()[0]
         cur, nxt = level_of(total)
         t = f"{total:,.0f}".replace(",", " ")
-        msg = f"💎 Ваш баланс: <b>{t} ₴</b>\n"
-        msg += f"Рівень: <b>{cur[2]}</b> — постійна знижка <b>{cur[1]}%</b> діє на всі покупки!" if cur else (f"До знижки {nxt[1]}% лишилось {nxt[0]-total:,.0f} ₴".replace(",", " ") if nxt else "")
+        msg = f"💎 Ваш баланс: <b>{t} грн</b>\n"
+        msg += f"Рівень: <b>{cur[2]}</b> — постійна знижка <b>{cur[1]}%</b> діє на всі покупки!" if cur else (f"До знижки {nxt[1]}% лишилось {nxt[0]-total:,.0f} грн".replace(",", " ") if nxt else "")
         send(chat_id, msg)
     if has_sold(ph): show_menu(chat_id, stage)
     else: send(chat_id, T["gate_first"])
@@ -468,7 +468,7 @@ def legacy_text(chat_id):  # -> (text, button_label)
         t = f"{total:,.0f}".replace(",", " ")
         if cur:
             return ((f"<b>{hello}ас чекає приємний сюрприз 💎</b>\n\n"
-                f"Ваші покупки в наших магазинах — уже <b>{t} ₴</b>, і у вас є <b>постійна знижка {cur[1]}%</b> (рівень «{cur[2]}»). Так, вона вже діє — можливо, ви й не знали!\n\n"
+                f"Ваші покупки в наших магазинах — уже <b>{t} грн</b>, і у вас є <b>постійна знижка {cur[1]}%</b> (рівень «{cur[2]}»). Так, вона вже діє — можливо, ви й не знали!\n\n"
                 f"Ми переїхали в нового помічника — там ваш баланс, знижка і подарунки 💗\n\n{WHATS_NEW}\n\nПеревірте свій баланс 👇"), "💎 Перевірити мій баланс")
         if total == 0:
             return ((f"<b>Ваша знижка на першу покупку досі чекає 💗</b>\n\n"
@@ -477,7 +477,7 @@ def legacy_text(chat_id):  # -> (text, button_label)
         if nxt and total > 0 and (nxt[0] - total) <= 1500:
             need = f"{nxt[0]-total:,.0f}".replace(",", " ")
             return ((f"<b>{hello}и за крок від постійної знижки! 💎</b>\n\n"
-                f"Ваші покупки — вже <b>{t} ₴</b>. До знижки <b>{nxt[1]}% назавжди</b> лишилось всього <b>{need} ₴</b>.\n\n" + MIGRATE_TEXT), "💎 Перевірити мій баланс")
+                f"Ваші покупки — вже <b>{t} грн</b>. До знижки <b>{nxt[1]}% назавжди</b> лишилось всього <b>{need} грн</b>.\n\n" + MIGRATE_TEXT), "💎 Перевірити мій баланс")
     return (MIGRATE_TEXT, "💗 Перейти в новий бот")
 
 def old_reply(chat_id):
@@ -675,7 +675,7 @@ class Hook(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
 STAGE_UA = {"b2b": "Організація 🏢", "pregnant": "Вагітність/0–1", "m0_3": "0–3 міс", "m3_6": "3–6 міс", "m6_12": "6–12 міс", "lipoland": "Lipoland", "unknown": "Невідомо"}
-GIFT_UA = {"dila": "Dila −20%", "coupon": "−300 ₴ Modnamama", "mam150": "−150 ₴ Mamulya.lviv", "freeship": "Безкошт. доставка", "referral": "Реферальна", "znana10": "−10% Znana", "antiage": "AntiAge догляд"}
+GIFT_UA = {"dila": "Dila −20%", "coupon": "−300 грн Modnamama", "mam150": "−150 грн Mamulya.lviv", "freeship": "Безкошт. доставка", "referral": "Реферальна", "znana10": "−10% Znana", "antiage": "AntiAge догляд"}
 
 LVL = [(25000, 10, "Діамант"), (15000, 7, "VIP"), (9000, 5, "Смарт"), (4500, 3, "Базовий")]
 
@@ -735,7 +735,7 @@ td,th{{padding:7px 12px;border-bottom:1px solid #E8DCD8;text-align:left;vertical
 <h1>{name} · {phone or "без телефону"}</h1>
 <table>
 {tr(("Магазин", store or "—"))}{tr(("Стадія", STAGE_UA.get(stage, stage) + (f' · <a href="/b2b?key={os.environ.get("ADMIN_KEY","")}&phone={phone}&id={cid}">{"зняти позначку організації" if stage=="b2b" else "позначити як організацію 🏢"}</a>' if phone else "")))}{tr(("Дата народження/ПДР", dob or "—"))}
-{tr(("Останнє замовлення", oid or "—"))}{tr(("Сума покупок", money + " ₴"))}
+{tr(("Останнє замовлення", oid or "—"))}{tr(("Сума покупок", money + " грн"))}
 {tr(("У боті з", time.strftime("%d.%m.%Y", time.localtime(created))))}
 {tr(("Подарунки", ", ".join(gifts) or "ще не обрано"))}
 {tr(("Купони", coup_html))}
@@ -751,7 +751,7 @@ def near_page():
     base = base_levels()
     near = sorted([b for b in base if 0 < b[5] <= 1000], key=lambda b: b[5])
     getname = lambda ph: (DB.execute("select name from names where phone=?", (ph,)).fetchone() or ["—"])[0]
-    rows = "".join(f"<tr><td>{b[0]}</td><td>{getname(b[0])}</td><td class=n>{b[1]:,.0f} ₴</td><td>{b[2]}</td><td class=n>{b[5]:,.0f} ₴</td><td>{b[4]}</td></tr>".replace(",", " ") for b in near)
+    rows = "".join(f"<tr><td>{b[0]}</td><td>{getname(b[0])}</td><td class=n>{b[1]:,.0f} грн</td><td>{b[2]}</td><td class=n>{b[5]:,.0f} грн</td><td>{b[4]}</td></tr>".replace(",", " ") for b in near)
     return f"""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Трішки до рівня</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
 <style>body{{font:13.5px/1.5 "Golos Text",system-ui,sans-serif;margin:0;background:#F7F2F0;color:#2B2226;padding:24px}}
@@ -759,7 +759,7 @@ h1{{font-size:18px}}table{{border-collapse:collapse;background:#fff;border:1px s
 td,th{{padding:6px 12px;border-bottom:1px solid #EADFDB;text-align:left}}th{{font-size:10.5px;text-transform:uppercase;color:#A1939A}}
 td.n{{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}}a{{color:#B8325A}}</style>
 <p><a href="/admin?key={AK}">← кабінет</a></p>
-<h1>«Трішки до рівня» ≤1000 ₴ — {len(near)} клієнтів</h1>
+<h1>«Трішки до рівня» ≤1000 грн — {len(near)} клієнтів</h1>
 <p style=color:#6E5F65;font-size:13px>Найгарячіший сегмент для SMS: маленька сума до постійної знижки. <a href="/segments.csv?key={AK}">Вивантажити CSV ↓</a></p>
 <table><tr><th>Телефон</th><th>Імʼя</th><th>Сума</th><th>Рівень</th><th>До наступного</th><th>Наступний</th></tr>{rows}</table>"""
 
@@ -853,7 +853,7 @@ def admin_page():
     coup_list = "".join(f"<tr><td><code>{c}</code></td><td>{who}</td><td class=n>{exp[:10]}</td><td>{'🟢' if live else '⚪'}{' 🔔' if rem else ''}</td></tr>" for c, who, exp, live, rem in cpn)
 
     lvl_rows = rows([(nm, lvl_counts.get(nm, 0)) for nm in ["Діамант", "VIP", "Смарт", "Базовий", "—"]], pct_of=len(base) or 1)
-    near_rows = "".join(f"<tr><td>{b[0]}</td><td>{getname(b[0])}</td><td class=n>{b[1]:,.0f} ₴</td><td class=n>{b[5]:,.0f} ₴ до «{b[4]}»</td></tr>".replace(",", " ") for b in near)
+    near_rows = "".join(f"<tr><td>{b[0]}</td><td>{getname(b[0])}</td><td class=n>{b[1]:,.0f} грн</td><td class=n>{b[5]:,.0f} грн до «{b[4]}»</td></tr>".replace(",", " ") for b in near)
     cust_rows = "".join(f"<tr><td><a href=/client?key={AK}&id={r[0]}>{r[2] if r[2]!='—' else r[0]}</a></td><td>{r[1]}</td><td>{r[8]}</td><td>{STAGE_UA.get(r[3], r[3])}</td><td>{r[4] or '—'}</td><td>{SRC_UA.get(r[7], r[7])}</td><td class=n>{r[5][5:16]}</td><td class=n>{r[6]}</td></tr>" for r in cust)
 
     cfg_stage = "".join(f"<tr><td>{STAGE_UA.get(st, st)}</td><td>{', '.join(kws)}</td></tr>" for st, kws in STAGE_RULES)
@@ -907,7 +907,7 @@ details.p[open] summary{{margin-bottom:8px}}
 {panel("Замовлення за магазинами", f"<table>{rows(stores)}</table>")}
 {panel("Клієнти за стадіями", f"<table>{rows(stages, STAGE_UA)}</table>")}
 {panel("Рівні бази", f"<table>{lvl_rows}</table>", extra=f" <small>{len(base)} клієнтів з покупками</small>")}
-{panel("«Трішки до рівня» ≤1000 ₴", f"<table><tr><th>Телефон</th><th>Імʼя</th><th>Сума</th><th>До рівня</th></tr>{near_rows}</table><p style=margin:8px 0 0;font-size:12.5px><a href=/near?key={AK}>Відкрити всіх {len(near_all)} →</a></p>", extra=f" <small>топ-10 з {len(near_all)}</small>")}
+{panel("«Трішки до рівня» ≤1000 грн", f"<table><tr><th>Телефон</th><th>Імʼя</th><th>Сума</th><th>До рівня</th></tr>{near_rows}</table><p style=margin:8px 0 0;font-size:12.5px><a href=/near?key={AK}>Відкрити всіх {len(near_all)} →</a></p>", extra=f" <small>топ-10 з {len(near_all)}</small>")}
 {panel("Останні клієнти", f"<table><tr><th>Клієнт</th><th>Телефон</th><th>Магазин</th><th>Стадія</th><th>ДН/ПДР</th><th>Джерело</th><th>Зайшла</th><th>🎁</th></tr>{cust_rows}</table>", wide=True)}
 {det("🎟 Останні видані купони", f"<table><tr><th>Код</th><th>Кому</th><th>До</th><th></th></tr>{coup_list or '<tr><td>поки нема</td></tr>'}</table>")}
 {det("⚙️ Стадія ← товар", f"<table>{cfg_stage}</table>")}
