@@ -224,10 +224,35 @@ def show_menu(chat_id, stage):
     send(chat_id, T["menu_header"].format(left=2 - picked), [[(g["label"], "gift:" + g["id"])] for g in options])
 
 # ---------- handlers ----------
+def znana_welcome(chat_id):
+    """Вітальна знижка з попапа на сайті. Видаємо до покупки й один раз на людину:
+    інакше та сама людина назбирає десяток кодів, попросивши посилання ще раз."""
+    row = DB.execute("select code, expires from coupons where chat_id=? and code like 'ZNBOT%' and expires>? order by expires desc limit 1",
+                     (chat_id, time.time())).fetchone()
+    if row:
+        code, exp = row
+        return send(chat_id, T["zn_welcome_again"].format(code=code, date=time.strftime("%d.%m", time.localtime(exp))),
+                    [[("Відкрити магазин зі знижкою", f"https://znanamama.com.ua/?promo={code}")]])
+    body = json.dumps({"prefix": "ZNBOT", "percent": 10, "uses": 1, "days": 7, "note": f"tg:{chat_id}"}).encode()
+    req = urllib.request.Request("https://znana-stock.onrender.com/api/promos/issue", body,
+                                 {"Content-Type": "application/json", "x-secret": os.environ.get("ZNANA_SECRET", "")})
+    try:
+        r = json.load(urllib.request.urlopen(req, timeout=20))
+        code = r["code"]; exp = time.time() + 7 * DAY
+        DB.execute("insert into coupons values(?,?,?,0)", (code, chat_id, exp)); DB.commit()
+        return send(chat_id, T["zn_welcome"].format(code=code, date=time.strftime("%d.%m", time.localtime(exp))),
+                    [[("Відкрити магазин зі знижкою", f"https://znanamama.com.ua/?promo={code}")]])
+    except Exception as e:
+        print("znana welcome", e)
+        return send(chat_id, T["zn_welcome_fail"])
+
+
 def on_start(chat_id, arg):
     if arg.startswith("ref"):
         DB.execute("insert or ignore into customers(chat_id,order_id,phone,stage,created) values(?,?,?,?,?)", (chat_id, arg, "", "unknown", time.time())); DB.commit()
         return send(chat_id, T["ref_welcome"], [[("Mamulya", "https://mamulya.lviv.ua"), ("Modnamama −300 грн", "https://modnamama.ua/?c=FRIEND300")]])
+    if arg == "znana-welcome":
+        return znana_welcome(chat_id)
     src = "sms" if arg.isdigit() else (arg or "direct")  # sms / qr / web / migrate / direct
     phone, items, store = fetch_order(arg) if arg.isdigit() else (None, [], "")
     if not phone:
@@ -569,7 +594,10 @@ def cron():
                     DB.execute("insert into sent values(?,?,?)", (chat_id, key, now))
         for code, chat_id, exp in DB.execute("select code,chat_id,expires from coupons where reminded=0 and expires-? < ?", (now, 5 * DAY)):
             try:
-                send(chat_id, T["coupon_left"].format(code=code), [[("Modnamama", f"https://modnamama.ua/?c={code}")]])
+                # кнопка має вести в той магазин, де код працює: ZNBOT — це Znana
+                btn = (("На Znana Mama", f"https://znanamama.com.ua/?promo={code}")
+                       if code.startswith("ZNBOT") else ("Modnamama", f"https://modnamama.ua/?c={code}"))
+                send(chat_id, T["coupon_left"].format(code=code), [[btn]])
                 DB.execute("insert or ignore into sent values(?,?,?)", (chat_id, f"coupexp:{code}", now))
             except Exception as e: print("remind", e)
             DB.execute("update coupons set reminded=1 where code=?", (code,))
