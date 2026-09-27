@@ -37,6 +37,8 @@ try: DB.execute("alter table orders add column status int default 0")
 except Exception: pass
 try: DB.execute("alter table customers add column src text default ''")
 except Exception: pass
+DB.execute("update customers set src='migrate' where coalesce(src,'')='' and chat_id in (select chat_id from legacy)")
+DB.execute("update customers set src='sms' where coalesce(src,'')='' and coalesce(order_id,'') not in ('', 'demo', 'web', 'migrate', 'qr')")
 DB.execute("update orders set store='Mamulya.lviv' where store='Mamulya'")
 DB.execute("update customers set store='Mamulya.lviv' where store='Mamulya'")
 DAY = 86400
@@ -306,7 +308,12 @@ def on_start(chat_id, arg):
         lvl = f"рівень {cur[2]}, ваша постійна знижка {cur[1]}%" if cur else (f"до знижки {nxt[1]}% лишилось {nxt[0]-total:,.0f} грн".replace(",", " ") if nxt else "")
         send(chat_id, T["welcome_repeat"].format(store=store or "нашому магазині", total=f"{total:,.0f}".replace(",", " "), lvl=lvl))
         return send(chat_id, T["gate_repeat"])
-    DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created,store,src) values(?,?,?,?,?,?,?)", (chat_id, arg, phone, stage, time.time(), store, src)); DB.commit()
+    if DB.execute("select 1 from customers where chat_id=?", (chat_id,)).fetchone():
+        DB.execute("update customers set order_id=?, phone=?, stage=?, created=?, store=?, src=case when coalesce(src,'')='' then ? else src end where chat_id=?",
+                   (arg, phone, stage, time.time(), store, src, chat_id))
+    else:
+        DB.execute("insert into customers(chat_id,order_id,phone,stage,created,store,src) values(?,?,?,?,?,?,?)", (chat_id, arg, phone, stage, time.time(), store, src))
+    DB.commit()
     send(chat_id, T["welcome_store"].format(store=store) if store else T["welcome"])
     if has_sold(phone):
         show_menu(chat_id, stage)
@@ -455,7 +462,11 @@ def on_contact(chat_id, phone):
         return send(chat_id, T["gate_nobuy"])
     items = json.loads(row[1]); stage = infer_stage(items)
     if DB.execute("select 1 from b2b where phone=?", (ph,)).fetchone(): stage = "b2b"
-    DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created,store) values(?,?,?,?,?,?)", (chat_id, row[0], ph, stage, time.time(), row[2] or "")); DB.commit()
+    if DB.execute("select 1 from customers where chat_id=?", (chat_id,)).fetchone():
+        DB.execute("update customers set order_id=?, phone=?, stage=?, store=? where chat_id=?", (row[0], ph, stage, row[2] or "", chat_id))
+    else:
+        DB.execute("insert into customers(chat_id,order_id,phone,stage,created,store) values(?,?,?,?,?,?)", (chat_id, row[0], ph, stage, time.time(), row[2] or ""))
+    DB.commit()
     send(chat_id, T["order_found"].format(order_id=row[0], item=items[0][:60]) if items else T["order_missing"])
     src_row = DB.execute("select coalesce(src,'') from customers where chat_id=?", (chat_id,)).fetchone()
     if src_row and src_row[0] == "migrate":
