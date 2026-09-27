@@ -16,9 +16,39 @@ DB.executescript("""
 create table if not exists users(chat_id integer primary key, src text default '', cat text default '', concern text default '', priority text default '', created real);
 create table if not exists sent(chat_id int, key text, ts real, primary key(chat_id,key));
 create table if not exists posts(id integer primary key autoincrement, ts real, text text);
+create table if not exists orders(order_id text primary key, chat_id int, phone text, amount real, ts real, status int, replenish real);
 """)
 DAY = 86400
 SITE = "https://antiagecosmetics.com.ua"
+SD_KEY = os.environ.get("SALESDRIVE_KEY", "")
+REPLENISH_DAYS = 50  # крем/сироватка ~1,5-2 міс — нагадування про поповнення
+LVL = [(25000, 10, "Діамант"), (15000, 7, "VIP"), (9000, 5, "Смарт"), (4500, 3, "Базовий")]
+
+def norm_phone(p):
+    d = "".join(c for c in str(p) if c.isdigit())
+    return "380" + d[-9:] if len(d) >= 9 else d
+
+def sd_order(order_id):
+    if not SD_KEY: return None
+    try:
+        req = urllib.request.Request(f"https://aleyana.salesdrive.me/api/order/list/?filter[id]={order_id}", headers={"Form-Api-Key": SD_KEY})
+        return json.load(urllib.request.urlopen(req, timeout=20))["data"][0]
+    except Exception as e: print("sd_order", e); return None
+
+def sd_total(phone):
+    # сума SOLD по всіх магазинах (спільний рівень)
+    if not SD_KEY or not phone: return 0
+    try:
+        req = urllib.request.Request(f"https://aleyana.salesdrive.me/api/order/list/?filter[phone]={phone}&limit=100", headers={"Form-Api-Key": SD_KEY})
+        data = json.load(urllib.request.urlopen(req, timeout=20)).get("data", [])
+        return sum(float(o.get("paymentAmount") or 0) for o in data if int(o.get("statusId") or 0) == 5)
+    except Exception as e: print("sd_total", e); return 0
+
+def level_line(phone):
+    total = sd_total(phone)
+    cur = next(((t, p, n) for t, p, n in LVL if total >= t), None)
+    if not cur: return None
+    return f"💎 Ваші покупки: <b>{total:,.0f} грн</b> — постійна знижка <b>{cur[1]}%</b> (рівень «{cur[2]}») діє на всі замовлення!".replace(",", " ")
 PROMO = ("\n\nВаш промокод: <code>ANTIAGE10</code>\n"
          "🎯 10% знижки на перше замовлення\n⏰ Діє 7 днів\n"
          "📝 Поле «Маєте купон на знижку?» при оформленні\n"
@@ -102,7 +132,21 @@ def start_quiz(chat_id):
 def on_start(chat_id, arg):
     DB.execute("insert or ignore into users(chat_id, src, created) values(?,?,?)", (chat_id, arg or "direct", time.time()))
     DB.execute("update users set src=? where chat_id=? and coalesce(src,'')=''", (arg or "direct", chat_id)); DB.commit()
+    if arg and arg.isdigit():
+        return after_purchase(chat_id, arg)
     start_quiz(chat_id)
+
+def after_purchase(chat_id, order_id):
+    o = sd_order(order_id)
+    phone = norm_phone((o.get("contacts") or [{}])[0].get("phone", [""])[0]) if o and isinstance(o.get("contacts"), list) else ""
+    amount = float(o.get("paymentAmount") or 0) if o else 0
+    status = int(o.get("statusId") or 0) if o else 0
+    DB.execute("insert or replace into orders values(?,?,?,?,?,?,?)", (order_id, chat_id, phone, amount, time.time(), status,
+               time.time() + REPLENISH_DAYS * DAY if status == 5 else 0)); DB.commit()
+    send(chat_id, "Дякуємо за замовлення в AntiAge Cosmetics 💛 Ми вже готуємо вашу посилку.")
+    ll = level_line(phone)
+    if ll: send(chat_id, ll)
+    send(chat_id, "А поки — підкажу, як доглядати за шкірою правильно 💧 Кнопки внизу завжди під рукою.")
 
 def finish(chat_id):
     row = DB.execute("select cat, concern from users where chat_id=?", (chat_id,)).fetchone()
@@ -170,6 +214,11 @@ def poll():
         except Exception as e:
             print("poll", e); time.sleep(5)
 
+REPLENISH_TEXT = ("Ваш догляд, мабуть, добігає кінця 💧 Час поповнити запас, щоб не переривати рутину.\n\n"
+    "Ваша постійна знижка вже діє на сайті — просто оберіть улюблене 👇")
+CROSS_TEXT = ("Як ваша шкіра? 🌿 Якщо результат тішить — саме час підсилити догляд: сироватка + крем працюють у парі краще, ніж окремо.\n\n"
+    "Загляньте в каталог — підберемо наступний крок 💛")
+
 def cron():
     while True:
         now = time.time()
@@ -180,6 +229,20 @@ def cron():
                         send(chat_id, text, [[("🛍 На сайт", SITE)]])
                         DB.execute("insert into sent values(?,?,?)", (chat_id, key, now))
                     except Exception as e: print("drip", e)
+        # поповнення + крос-сел за датою SOLD
+        for chat_id, rep in DB.execute("select chat_id, replenish from orders where replenish>0 and replenish<=?", (now,)):
+            if not DB.execute("select 1 from sent where chat_id=? and key='replenish'", (chat_id,)).fetchone():
+                try:
+                    send(chat_id, REPLENISH_TEXT, [[("🛍 Поповнити запас", SITE)]])
+                    DB.execute("insert into sent values(?,?,?)", (chat_id, "replenish", now))
+                except Exception as e: print("replenish", e)
+            DB.execute("update orders set replenish=0 where chat_id=? and replenish<=?", (chat_id, now))
+        for chat_id, ts0 in DB.execute("select chat_id, ts from orders group by chat_id having max(ts)=ts"):
+            if now - ts0 >= 14 * DAY and not DB.execute("select 1 from sent where chat_id=? and key='cross'", (chat_id,)).fetchone():
+                try:
+                    send(chat_id, CROSS_TEXT, [[("🌿 Каталог", SITE)]])
+                    DB.execute("insert into sent values(?,?,?)", (chat_id, "cross", now))
+                except Exception as e: print("cross", e)
         DB.commit()
         time.sleep(3600)
 
@@ -208,6 +271,27 @@ td{{padding:5px 10px;border-bottom:1px solid #DFE7DB}}td.n{{text-align:right}}a{
 
 HTTPServer.allow_reuse_address = True
 class Hook(BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or b"{}"))
+        o = body.get("data", body)
+        if isinstance(o, list): o = o[0]
+        try:
+            oid = str(o.get("id")); status = int(o.get("statusId") or 0)
+            phone = norm_phone((o.get("contacts") or [{}])[0].get("phone", [""])[0]) if isinstance(o.get("contacts"), list) else ""
+            row = DB.execute("select chat_id, replenish from orders where order_id=?", (oid,)).fetchone()
+            if row:
+                cid = row[0]
+                if status == 5 and not row[1]:
+                    DB.execute("update orders set status=5, replenish=? where order_id=?", (time.time() + REPLENISH_DAYS * DAY, oid))
+                    send(cid, "Замовлення отримано 🎉 Дякуємо! Гарного догляду 💛")
+                    ll = level_line(phone)
+                    if ll: send(cid, ll)
+                elif status in (6, 13):
+                    DB.execute("update orders set replenish=0 where order_id=?", (oid,))
+                DB.commit()
+        except Exception as e: print("hook", e)
+        self.send_response(200); self.end_headers()
+
     def do_GET(self):
         from urllib.parse import urlparse, parse_qs
         u = urlparse(self.path)
