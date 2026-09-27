@@ -27,6 +27,8 @@ try: DB.execute("alter table orders add column amount real default 0")
 except Exception: pass
 try: DB.execute("alter table orders add column store text default ''")
 except Exception: pass
+try: DB.execute("alter table orders add column coupon text default ''")
+except Exception: pass
 try: DB.execute("alter table customers add column store text default ''")
 except Exception: pass
 try: DB.execute("alter table sent add column ts real")
@@ -163,7 +165,7 @@ def save_order(o, names=None):
     names = names or {}
     items = [p.get("name") or names.get(p.get("productId"), "") for p in o.get("products", [])]
     store = STORES.get(int(o.get("sajt") or 0), MARKETPLACE_FALLBACK if o.get("sajt") else "")
-    DB.execute("insert or replace into orders values(?,?,?,?,?,?,?)", (str(o.get("id")), phone, json.dumps(items, ensure_ascii=False), time.time(), float(o.get("paymentAmount") or 0), store, int(o.get("statusId") or 0))); DB.commit()
+    DB.execute("insert or replace into orders values(?,?,?,?,?,?,?,?)", (str(o.get("id")), phone, json.dumps(items, ensure_ascii=False), time.time(), float(o.get("paymentAmount") or 0), store, int(o.get("statusId") or 0), coupon_in(o) or "")); DB.commit()
     return phone, items
 
 # ---------- gifts ----------
@@ -880,13 +882,15 @@ def admin_page():
     ANS_UA = {"pregnant": "🤰 чекає малюка", "mama": "🤱 вже мама", "gift": "🎁 на подарунок", "org": "🏢 організація", "look": "👀 роздивляється"}
     pr_answers = q("select substr(key,10), count(*) from sent where key like 'promoans:%' group by 1 order by 2 desc")
     pr_bought = n("select count(*) from customers c where c.src='promo' and c.phone!='' and exists(select 1 from orders o where o.phone=c.phone)")
+    love7 = n(f"select count(*) from orders where coupon='LOVE7' and ts>={LAUNCH} and status not in (6,7,13,15,8)")
     pr_r1 = n("select count(*) from sent where key='promo_r1'"); pr_r2 = n("select count(*) from sent where key='promo_r2'")
     pr_rows = f"""<tr><td>Перейшли з попапа</td><td class=n>{pr_in}</td><td></td></tr>
 <tr><td>Відповіли на питання → LOVE7</td><td class=n>{pr_ans}</td><td class=n>{(pr_ans/pr_in*100 if pr_in else 0):.0f}%</td></tr>"""
     for k, v in pr_answers:
         pr_rows += f"<tr class=sub><td>{ANS_UA.get(k, k)}</td><td class=n>{v}</td><td class=n>{(v/pr_ans*100 if pr_ans else 0):.0f}%</td></tr>"
     pr_rows += f"""<tr><td>Нагадувань про код (д2/д5)</td><td class=n>{pr_r1}/{pr_r2}</td><td></td></tr>
-<tr><td><b>Зробили перше замовлення</b></td><td class=n><b>{pr_bought}</b></td><td class=n><b>{(pr_bought/pr_in*100 if pr_in else 0):.0f}%</b></td></tr>"""
+<tr><td><b>Замовлень із кодом LOVE7 (по CRM)</b></td><td class=n><b>{love7}</b></td><td></td></tr>
+<tr class=sub><td>з них простежено до бота</td><td class=n>{pr_bought}</td><td></td></tr>"""
     cust = q("select c.chat_id, coalesce(nullif(c.phone,''),'—'), coalesce((select name from names nm where nm.phone=c.phone),'—'), c.stage, c.dob, datetime(c.created,'unixepoch','localtime'), (select count(*) from gifts g where g.chat_id=c.chat_id), coalesce(nullif(c.src,''),'—'), coalesce(nullif(c.store,''),'—') from customers c order by c.created desc limit 100")
     cards = [("Клієнтів у боті", nc), ("З номером", n("select count(*) from customers where phone!=''")),
              ("Замовлень у базі", n("select count(*) from orders")), ("Подарунків", n("select count(*) from gifts")),
