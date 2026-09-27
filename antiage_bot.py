@@ -218,6 +218,10 @@ def replenish_text(phone):
     total = sd_total(phone)
     cur = next(((t, p, n) for t, p, n in LVL if total >= t), None)
     base = "Ваш догляд, мабуть, добігає кінця 💧 Час поповнити запас, щоб не переривати рутину."
+    code = os.environ.get("ANTIAGE_REPEAT_CODE", "")
+    if code:
+        desc = os.environ.get("ANTIAGE_REPEAT_DESC", "−10%")
+        return base + f"\n\n🎁 Тільки для вас — знижка <b>{desc}</b> на це замовлення. Промокод: <code>{code}</code> у полі «Маєте купон на знижку?» 👇"
     if cur:
         return base + f"\n\n💎 Ваша постійна знижка <b>{cur[1]}%</b> (рівень «{cur[2]}») чекає — просто оберіть улюблене 👇"
     nxt = ([l for l in reversed(LVL) if total < l[0]] or [None])[0]
