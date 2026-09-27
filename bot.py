@@ -135,10 +135,11 @@ STORES = {94: "Mamulya.lviv", 97: "Mamulya.lviv", 134: "Mamulya.lviv", 120: "Mod
 MARKETPLACE_FALLBACK = "Hubber та інші маркетплейси"  # усі sajt поза мапою — це Hubber-канали
 # ponytail: рахуємо все живе одразу; DECLINED/Повернення/Скасований/TEST/Видалений випадають самі при зміні статусу (вебхук)
 
-BOT_COUPONS = ("FREESHIP", "MAMA150", "MMBOT", "ZNBOT", "FRIEND300", "LOVE7")
+BOT_COUPONS = ("FREESHIP", "MAMA150", "MMBOT", "ZNBOT", "FRIEND300", "FRIEND10", "LOVE7", "ANTIAGE10")
 
 def coupon_in(o):
-    blob = (str(o.get("comment") or "") + " " + str(o.get("certificate") or "")).upper()
+    # ponytail: SalesDrive кладе код по-різному (comment/certificate/payment) — шукаємо у всьому обʼєкті
+    blob = json.dumps(o, ensure_ascii=False).upper()
     return next((c for c in BOT_COUPONS if c in blob), None)
 
 def abuse_check(o):
