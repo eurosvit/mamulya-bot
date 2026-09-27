@@ -895,6 +895,12 @@ def admin_page():
 <tr><td><b>Замовлень із кодом LOVE7 (по CRM)</b></td><td class=n><b>{love7}</b></td><td></td></tr>
 <tr class=sub><td>з них простежено до бота</td><td class=n>{pr_bought}</td><td></td></tr>"""
     cust = q("select c.chat_id, coalesce(nullif(c.phone,''),'—'), coalesce((select name from names nm where nm.phone=c.phone),'—'), c.stage, c.dob, datetime(c.created,'unixepoch','localtime'), (select count(*) from gifts g where g.chat_id=c.chat_id), coalesce(nullif(c.src,''),'—'), coalesce(nullif(c.store,''),'—') from customers c order by c.created desc limit 100")
+    CODE_UA = {"LOVE7": "LOVE7 · велком-попап −7%", "FREESHIP": "FREESHIP · безкошт. доставка", "MAMA150": "MAMA150 · −150 грн Mamulya",
+               "MMBOT": "−300 грн Modnamama (персон.)", "ZNBOT": "−10% Znana (персон.)", "FRIEND300": "FRIEND300 · реферал −300"}
+    coup_use = q(f"""select case when coupon like 'MMBOT%' then 'MMBOT' when coupon like 'ZNBOT%' then 'ZNBOT' else coupon end code,
+        count(*), coalesce(sum(amount),0), coalesce(sum(case when status=5 then amount else 0 end),0)
+        from orders where coupon!='' and ts>={LAUNCH} group by code order by 3 desc""")
+    coup_use_rows = "".join(f"<tr><td>{CODE_UA.get(c, c)}</td><td class=n>{cnt}</td><td class=n>{tot:,.0f}</td><td class=n>{sold:,.0f}</td></tr>".replace(",", " ") for c, cnt, tot, sold in coup_use)
     cards = [("Клієнтів у боті", nc), ("З номером", n("select count(*) from customers where phone!=''")),
              ("Замовлень у базі", n("select count(*) from orders")), ("Подарунків", n("select count(*) from gifts")),
              ("Активних купонів", n(f"select count(*) from coupons where expires>{now}")), ("Нагадувань", n("select count(*) from sent"))]
@@ -977,6 +983,7 @@ details.p[open] summary{{margin-bottom:8px}}
 {panel("По днях", f"<table><tr><th>Дата</th><th>Замовл.</th><th>У бот</th><th>Конв.</th></tr>{daily_rows}</table>", extra=" <small>останні 14 днів</small>")}
 {panel("Обрані подарунки", f"<table>{rows(gifts, GIFT_UA, pct_of=pickers or 1)}</table>", extra=f" <small>% від {pickers} з подарунками</small>")}
 {panel("Купони", f"<table>{coup_sum}</table>")}
+{panel("Використання кодів у замовленнях <small>з 10.09, по CRM</small>", f"<table><tr><th>Код</th><th>Замовлень</th><th>Сума, грн</th><th>з них отримано</th></tr>{coup_use_rows or '<tr><td>поки нема</td></tr>'}</table>", wide=True)}
 {panel("Замовлення за магазинами", f"<table>{rows(stores)}</table>")}
 {panel("Клієнти за стадіями", f"<table>{rows(stages, STAGE_UA)}</table>")}
 {panel("Рівні бази", f"<table>{lvl_rows}</table>", extra=f" <small>{len(base)} клієнтів з покупками</small>")}
