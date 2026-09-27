@@ -1,7 +1,7 @@
 """Mamulya TG-бот лояльності. Тільки stdlib: long-polling Telegram + HTTP-вебхук SalesDrive + sqlite.
 ENV: BOT_TOKEN, SALESDRIVE_KEY, MEDUSA_URL, MEDUSA_KEY, DILA_CODE, BOT_NAME, PORT
 """
-import json, os, sqlite3, threading, time, urllib.request, urllib.parse
+import json, os, re, sqlite3, threading, time, urllib.request, urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from rules import infer_stage, gifts_for, LIFECYCLE, STAGE_RULES, GIFTS, TEXTS as T, STAGE_PITCH
@@ -42,8 +42,31 @@ DB.execute("update customers set store='Mamulya.lviv' where store='Mamulya'")
 DAY = 86400
 
 # ---------- helpers ----------
+# Усі посилання на наші магазини йдуть із міткою джерела: у SalesDrive заведена
+# кампанія «Telegram Bot» (utm_source=telegram, utm_medium=bot), і без мітки
+# замовлення з бота лягають у «без джерела». Ставимо її тут, у єдиному місці,
+# через яке проходить кожне повідомлення, — щоб нове посилання не забулось.
+SHOPS = ("znanamama.com.ua", "modnamama.ua", "mamulya.lviv.ua", "antiagecosmetics.com.ua", "lipoland.fun")
+UTM = "utm_source=telegram&utm_medium=bot"
+
+def utm(url, amp="&"):
+    # amp="&amp;" — для посилань усередині HTML-тексту: Telegram парсить його як HTML
+    if not isinstance(url, str) or not url.startswith("http"): return url
+    if "utm_source=" in url or not any(h in url for h in SHOPS): return url
+    head, sep, frag = url.partition("#")
+    return head + (amp if "?" in head else "?") + UTM.replace("&", amp) + sep + frag
+
+def stamp(kw):
+    for k in ("text", "caption"):
+        if isinstance(kw.get(k), str):
+            kw[k] = re.sub(r'href="([^"]+)"', lambda m: 'href="%s"' % utm(m.group(1), "&amp;"), kw[k])
+    for row in (kw.get("reply_markup") or {}).get("inline_keyboard") or []:
+        for btn in row:
+            if btn.get("url"): btn["url"] = utm(btn["url"])
+    return kw
+
 def tg(method, **kw):
-    req = urllib.request.Request(API + method, json.dumps(kw).encode(), {"Content-Type": "application/json"})
+    req = urllib.request.Request(API + method, json.dumps(stamp(kw)).encode(), {"Content-Type": "application/json"})
     return json.load(urllib.request.urlopen(req, timeout=30))
 
 KB = {"keyboard": [[{"text": "🎁 Подарунки"}, {"text": "🎟 Мої купони"}],
