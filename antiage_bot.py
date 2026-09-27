@@ -214,8 +214,17 @@ def poll():
         except Exception as e:
             print("poll", e); time.sleep(5)
 
-REPLENISH_TEXT = ("Ваш догляд, мабуть, добігає кінця 💧 Час поповнити запас, щоб не переривати рутину.\n\n"
-    "Ваша постійна знижка вже діє на сайті — просто оберіть улюблене 👇")
+def replenish_text(phone):
+    total = sd_total(phone)
+    cur = next(((t, p, n) for t, p, n in LVL if total >= t), None)
+    base = "Ваш догляд, мабуть, добігає кінця 💧 Час поповнити запас, щоб не переривати рутину."
+    if cur:
+        return base + f"\n\n💎 Ваша постійна знижка <b>{cur[1]}%</b> (рівень «{cur[2]}») чекає — просто оберіть улюблене 👇"
+    nxt = ([l for l in reversed(LVL) if total < l[0]] or [None])[0]
+    if nxt and total > 0:
+        need = f"{nxt[0]-total:,.0f}".replace(",", " ")
+        return base + f"\n\nА цим замовленням ви наблизитесь до постійної знижки {nxt[1]}% — лишилось лише {need} грн 👇"
+    return base + "\n\nОберіть улюблене — і почніть накопичувати на постійну знижку до 10% 👇"
 CROSS_TEXT = ("Як ваша шкіра? 🌿 Якщо результат тішить — саме час підсилити догляд: сироватка + крем працюють у парі краще, ніж окремо.\n\n"
     "Загляньте в каталог — підберемо наступний крок 💛")
 
@@ -232,8 +241,9 @@ def cron():
         # поповнення + крос-сел за датою SOLD
         for chat_id, rep in DB.execute("select chat_id, replenish from orders where replenish>0 and replenish<=?", (now,)):
             if not DB.execute("select 1 from sent where chat_id=? and key='replenish'", (chat_id,)).fetchone():
+                ph_ = (DB.execute("select phone from orders where chat_id=? order by ts desc limit 1", (chat_id,)).fetchone() or [""])[0]
                 try:
-                    send(chat_id, REPLENISH_TEXT, [[("🛍 Поповнити запас", SITE)]])
+                    send(chat_id, replenish_text(ph_), [[("🛍 Поповнити запас", SITE)]])
                     DB.execute("insert into sent values(?,?,?)", (chat_id, "replenish", now))
                 except Exception as e: print("replenish", e)
             DB.execute("update orders set replenish=0 where chat_id=? and replenish<=?", (chat_id, now))
