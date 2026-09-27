@@ -833,16 +833,17 @@ def admin_page():
     n = lambda sql: q(sql)[0][0]
     now = time.time()
     LAUNCH = 1789045200  # 10.09.2026 — старт SMS
-    orders_since = n(f"select count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8)")
+    LOYAL = "('Mamulya.lviv','Modnamama','Znana Mama','AntiAge')"  # воронка лише по магазинах програми
+    orders_since = n(f"select count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8) and store in {LOYAL}")
     entered = n(f"select count(*) from customers where created>={LAUNCH}")
     conv = f"{entered/orders_since*100:.0f}%" if orders_since else "—"
     nc = n("select count(*) from customers")
     picks = {r[0]: r[1] for r in q("select cnt, count(*) from (select c.chat_id, (select count(*) from gifts g where g.chat_id=c.chat_id) cnt from customers c) group by cnt")}
     p0 = picks.get(0, 0); p1 = picks.get(1, 0); p2 = sum(v for k, v in picks.items() if k >= 2)
     pickers = nc - p0
-    bso = dict(q(f"select coalesce(nullif(store,''),'{MARKETPLACE_FALLBACK}'), count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8) group by 1"))
+    bso = dict(q(f"select store, count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8) and store in {LOYAL} group by 1"))
     bse = dict(q(f"select store, count(*) from customers where created>={LAUNCH} and coalesce(store,'')!='' group by 1"))
-    daily_o = dict(q(f"select date(ts,'unixepoch','localtime') d, count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8) group by d"))
+    daily_o = dict(q(f"select date(ts,'unixepoch','localtime') d, count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8) and store in {LOYAL} group by d"))
     daily_e = dict(q(f"select date(created,'unixepoch','localtime') d, count(*) from customers where created>={LAUNCH} group by d"))
     daily_rows = ""
     for d in sorted(set(daily_o) | set(daily_e), reverse=True)[:14]:
@@ -962,7 +963,7 @@ details.p[open] summary{{margin-bottom:8px}}
 <span class=upd style=margin-left:auto><a href="/segments.csv?key={AK}">CSV сегментів ↓</a></span></div>
 <div class=tiles>{"".join(f"<div class=tile><b>{v}</b><span>{k}</span></div>" for k, v in cards)}</div>
 <div class=grid>
-{panel("Воронка · SMS → бот → подарунки", f"<table>{fun}</table>")}
+{panel("Воронка · SMS → бот → подарунки <small>лише магазини програми</small>", f"<table>{fun}</table>")}
 {panel("Звідки прийшли в бот", f"<table>{rows(srcs, SRC_UA)}</table>")}
 {panel("Міграція зі старого бота", f"<table>{mg_rows}</table>")}
 {panel("Попап −7% (велком-потік)", f"<table>{pr_rows}</table>")}
