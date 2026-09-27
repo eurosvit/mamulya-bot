@@ -2,10 +2,10 @@
 """AntiAge Cosmetics бот (@AntiAgeCosmetics_Bot) — квіз-підбір догляду, перенесений із SendPulse.
 Тільки stdlib. ENV: BOT_TOKEN, ADMIN_IDS, ADMIN_KEY, PEER_ADMIN (URL кабінету Mamulya), DB, PORT
 """
-import json, os, sqlite3, threading, time
+import json, os, sqlite3, threading, time, urllib.request
 os.environ["TZ"] = "Europe/Kyiv"
 try: time.tzset()
-except Exception: pass, urllib.request
+except Exception: pass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 TOKEN = os.environ["BOT_TOKEN"]
