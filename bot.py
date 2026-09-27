@@ -3,6 +3,9 @@ ENV: BOT_TOKEN, SALESDRIVE_KEY, MEDUSA_URL, MEDUSA_KEY, DILA_CODE, BOT_NAME, POR
 """
 import json, os, re, sqlite3, threading, time, urllib.request, urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
+os.environ["TZ"] = "Europe/Kyiv"
+try: time.tzset()
+except Exception: pass
 
 from rules import infer_stage, gifts_for, LIFECYCLE, STAGE_RULES, GIFTS, TEXTS as T, STAGE_PITCH
 
