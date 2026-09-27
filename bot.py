@@ -123,7 +123,9 @@ def fetch_order(order_id):
         except Exception as e: print("salesdrive", e)
     return None, [], ""
 
-STORES = {94: "Mamulya.lviv", 97: "Mamulya.lviv", 134: "Mamulya.lviv", 120: "Modnamama", 150: "Modnamama", 157: "Modnamama", 164: "Znana Mama", 22: "AntiAge"}
+STORES = {94: "Mamulya.lviv", 97: "Mamulya.lviv", 134: "Mamulya.lviv", 120: "Modnamama", 150: "Modnamama", 157: "Modnamama", 164: "Znana Mama", 22: "AntiAge", 46: "AntiAge",
+          100: "Rozetka", 110: "Rozetka", 145: "Rozetka", 98: "Etsy", 26: "Lipoland (eBay)", 30: "kolyaska.ua", 39: "happyparents", 76: "Vdomagarno", 82: "Mama_Sling", 111: "Eva.ua"}
+MARKETPLACE_FALLBACK = "Hubber та інші маркетплейси"  # усі sajt поза мапою — це Hubber-канали
 # ponytail: рахуємо все живе одразу; DECLINED/Повернення/Скасований/TEST/Видалений випадають самі при зміні статусу (вебхук)
 
 BOT_COUPONS = ("FREESHIP", "MAMA150", "MMBOT", "ZNBOT", "FRIEND300", "LOVE7")
@@ -158,7 +160,7 @@ def save_order(o, names=None):
     if phone and (c0.get("company") or "").strip(): DB.execute("insert or ignore into b2b values(?)", (phone,))
     names = names or {}
     items = [p.get("name") or names.get(p.get("productId"), "") for p in o.get("products", [])]
-    store = STORES.get(o.get("sajt"), "")
+    store = STORES.get(int(o.get("sajt") or 0), MARKETPLACE_FALLBACK if o.get("sajt") else "")
     DB.execute("insert or replace into orders values(?,?,?,?,?,?,?)", (str(o.get("id")), phone, json.dumps(items, ensure_ascii=False), time.time(), float(o.get("paymentAmount") or 0), store, int(o.get("statusId") or 0))); DB.commit()
     return phone, items
 
@@ -827,8 +829,8 @@ def admin_page():
     picks = {r[0]: r[1] for r in q("select cnt, count(*) from (select c.chat_id, (select count(*) from gifts g where g.chat_id=c.chat_id) cnt from customers c) group by cnt")}
     p0 = picks.get(0, 0); p1 = picks.get(1, 0); p2 = sum(v for k, v in picks.items() if k >= 2)
     pickers = nc - p0
-    bso = dict(q(f"select coalesce(nullif(store,''),'інше'), count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8) group by 1"))
-    bse = dict(q(f"select coalesce(nullif(store,''),'інше'), count(*) from customers where created>={LAUNCH} group by 1"))
+    bso = dict(q(f"select coalesce(nullif(store,''),'{MARKETPLACE_FALLBACK}'), count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8) group by 1"))
+    bse = dict(q(f"select store, count(*) from customers where created>={LAUNCH} and coalesce(store,'')!='' group by 1"))
     daily_o = dict(q(f"select date(ts,'unixepoch','localtime') d, count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8) group by d"))
     daily_e = dict(q(f"select date(created,'unixepoch','localtime') d, count(*) from customers where created>={LAUNCH} group by d"))
     daily_rows = ""
@@ -892,7 +894,8 @@ def admin_page():
 <tr><td><b>Перейшли в бот</b></td><td class=n><b>{entered}</b></td><td class=n><b>{conv}</b></td></tr>"""
     for st in sorted(set(bso) | set(bse), key=lambda x: -bso.get(x, 0)):
         o, e = bso.get(st, 0), bse.get(st, 0)
-        c = f"{e/o*100:.0f}%" if o else "—"
+        sms_store = st in ("Mamulya.lviv", "Modnamama", "Znana Mama")
+        c = (f"{e/o*100:.0f}%" if o else "—") if sms_store else "без SMS"
         fun += f"<tr class=sub><td>{st}</td><td class=n>{o} → {e}</td><td class=n>{c}</td></tr>"
     fun += f"""<tr><td>Нічого не обрали</td><td class=n>{p0}</td><td class=n>{(p0/nc*100 if nc else 0):.0f}%</td></tr>
 <tr><td>Обрали 1</td><td class=n>{p1}</td><td class=n>{(p1/nc*100 if nc else 0):.0f}%</td></tr>
