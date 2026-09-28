@@ -17,6 +17,7 @@ create table if not exists users(chat_id integer primary key, src text default '
 create table if not exists sent(chat_id int, key text, ts real, primary key(chat_id,key));
 create table if not exists posts(id integer primary key autoincrement, ts real, text text);
 create table if not exists orders(order_id text primary key, chat_id int, phone text, amount real, ts real, status int, replenish real);
+create table if not exists gifts(chat_id int primary key, gift text, ts real);
 """)
 DAY = 86400
 SITE = "https://antiagecosmetics.com.ua"
@@ -43,6 +44,28 @@ def sd_total(phone):
         data = json.load(urllib.request.urlopen(req, timeout=20)).get("data", [])
         return sum(float(o.get("paymentAmount") or 0) for o in data if int(o.get("statusId") or 0) == 5)
     except Exception as e: print("sd_total", e); return 0
+
+DILA_CODE = os.environ.get("ANTIAGE_DILA_CODE", "667562")
+FREESHIP_CODE = os.environ.get("ANTIAGE_FREESHIP_CODE", "")
+
+def gift_menu(chat_id):
+    if DB.execute("select 1 from gifts where chat_id=?", (chat_id,)).fetchone():
+        return  # вже обрано
+    btns = [[("🧪 −20% на аналізи в Dila", "gift:dila")]]
+    if FREESHIP_CODE: btns.append([("📦 Безкоштовна доставка", "gift:ship")])
+    if os.environ.get("ANTIAGE_REPEAT_CODE"): btns.append([("🎁 −10% на наступне замовлення", "gift:repeat")])
+    send(chat_id, "🎁 Дякуємо за довіру! Оберіть подарунок, який вам зараз корисний:", btns)
+
+def give_gift(chat_id, gift):
+    DB.execute("insert or replace into gifts values(?,?,?)", (chat_id, gift, time.time())); DB.commit()
+    if gift == "dila":
+        send(chat_id, f"🧪 <b>−20% на аналізи в лабораторії Dila</b> — краса починається зсередини 💛\nКод: <code>{DILA_CODE}</code> — назвіть на рецепції або в кабінеті Dila.\nЗнижка не сумується з іншими.")
+    elif gift == "ship":
+        send(chat_id, f"📦 <b>Безкоштовна доставка</b> на наступне замовлення в AntiAge.\nКод: <code>{FREESHIP_CODE}</code> — введіть у полі «Маєте купон на знижку?».")
+    elif gift == "repeat":
+        code = os.environ.get("ANTIAGE_REPEAT_CODE", ""); desc = os.environ.get("ANTIAGE_REPEAT_DESC", "−10%")
+        send(chat_id, f"🎁 Знижка <b>{desc}</b> на наступне замовлення.\nКод: <code>{code}</code> — у полі «Маєте купон на знижку?».")
+    send(chat_id, "Збережено 💛 Промокод завжди під рукою — кнопка «🎁 Мій промокод» унизу.")
 
 def level_line(phone):
     total = sd_total(phone)
@@ -146,7 +169,10 @@ def after_purchase(chat_id, order_id):
     send(chat_id, "Дякуємо за замовлення в AntiAge Cosmetics 💛 Ми вже готуємо вашу посилку.")
     ll = level_line(phone)
     if ll: send(chat_id, ll)
-    send(chat_id, "А поки — підкажу, як доглядати за шкірою правильно 💧 Кнопки внизу завжди під рукою.")
+    if status == 5:
+        gift_menu(chat_id)
+    else:
+        send(chat_id, "А поки — підкажу, як доглядати за шкірою правильно 💧 Щойно отримаєте посилку, на вас чекатиме подарунок 🎁")
 
 def finish(chat_id):
     row = DB.execute("select cat, concern from users where chat_id=?", (chat_id,)).fetchone()
@@ -159,6 +185,8 @@ def finish(chat_id):
 def on_callback(cb):
     chat_id, data = cb["message"]["chat"]["id"], cb["data"]
     tg("answerCallbackQuery", callback_query_id=cb["id"])
+    if data.startswith("gift:"):
+        return give_gift(chat_id, data[5:])
     if data.startswith("q1:"):
         cat = data[3:]
         DB.execute("update users set cat=? where chat_id=?", (cat, chat_id)); DB.commit()
@@ -300,6 +328,7 @@ class Hook(BaseHTTPRequestHandler):
                     send(cid, "Замовлення отримано 🎉 Дякуємо! Гарного догляду 💛")
                     ll = level_line(phone)
                     if ll: send(cid, ll)
+                    gift_menu(cid)
                 elif status in (6, 13):
                     DB.execute("update orders set replenish=0 where order_id=?", (oid,))
                 DB.commit()
