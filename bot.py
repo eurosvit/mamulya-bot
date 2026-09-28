@@ -636,10 +636,14 @@ def cron():
                     DB.execute("insert into sent values(?,?,?)", (chat_id, key, now))
         for code, chat_id, exp in DB.execute("select code,chat_id,expires from coupons where reminded=0 and expires-? < ?", (now, 5 * DAY)):
             try:
-                # кнопка має вести в той магазин, де код працює: ZNBOT — це Znana
-                btn = (("На Znana Mama", f"https://znanamama.com.ua/?promo={code}")
-                       if code.startswith("ZNBOT") else ("Modnamama", f"https://modnamama.ua/?c={code}"))
-                send(chat_id, T["coupon_left"].format(code=code), [[btn]])
+                # кнопка + текст під магазин коду
+                if code.startswith("ZNBOT"):
+                    btn = ("На Znana Mama", f"https://znanamama.com.ua/?promo={code}")
+                    what = "Зручний одяг для вагітних і годуючих від нашого бренду Znana Mama"
+                else:
+                    btn = ("На Modnamama", f"https://modnamama.ua/?c={code}")
+                    what = "Все для малюка в Modnamama — коляски, купання, іграшки, одяг"
+                send(chat_id, T["coupon_left"].format(code=code, what=what), [[btn]])
                 DB.execute("insert or ignore into sent values(?,?,?)", (chat_id, f"coupexp:{code}", now))
             except Exception as e: print("remind", e)
             DB.execute("update coupons set reminded=1 where code=?", (code,))
