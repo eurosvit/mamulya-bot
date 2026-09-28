@@ -338,6 +338,26 @@ class Hook(BaseHTTPRequestHandler):
     def do_GET(self):
         from urllib.parse import urlparse, parse_qs
         u = urlparse(self.path)
+        if u.path == "/stats.json" and parse_qs(u.query).get("key", [""])[0] == os.environ.get("ADMIN_KEY", ""):
+            n = lambda q: DB.execute(q).fetchone()[0]
+            data = {
+                "bot": "AntiAge",
+                "users": n("select count(*) from users"),
+                "quiz_done": n("select count(*) from sent where key='quiz_done'"),
+                "categories": dict(DB.execute("select cat, count(*) from users where cat!='' group by cat").fetchall()),
+                "orders": n("select count(*) from orders"),
+                "orders_sold": n("select count(*) from orders where status=5"),
+                "gifts_chosen": n("select count(*) from gifts"),
+                "gifts_by_type": dict(DB.execute("select gift, count(*) from gifts group by gift").fetchall()),
+                "replenish_pending": n("select count(*) from orders where replenish>0"),
+                "replenish_sent": n("select count(*) from sent where key='replenish'"),
+                "cross_sent": n("select count(*) from sent where key='cross'"),
+                "sources": dict(DB.execute("select coalesce(nullif(src,''),'direct'), count(*) from users group by 1").fetchall()),
+                "ts": int(time.time()),
+            }
+            self.send_response(200); self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*"); self.end_headers()
+            self.wfile.write(json.dumps(data, ensure_ascii=False).encode()); return
         if u.path == "/admin" and parse_qs(u.query).get("key", [""])[0] == os.environ.get("ADMIN_KEY", ""):
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
             self.wfile.write(admin_page().encode()); return
