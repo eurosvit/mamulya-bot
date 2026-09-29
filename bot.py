@@ -713,6 +713,32 @@ class Hook(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         qs = parse_qs(u.query)
         authed = qs.get("key", [""])[0] == os.environ.get("ADMIN_KEY", "")
+        if u.path == "/stats.json" and authed:
+            LAUNCH = 1789045200
+            def n(q, *a): return DB.execute(q, a).fetchone()[0]
+            nc = n("select count(*) from customers")
+            orders_since = n(f"select count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8) and store in ('Mamulya.lviv','Modnamama','Znana Mama')")
+            entered = n(f"select count(*) from customers where created>={LAUNCH}")
+            base = base_levels(); lc = {}
+            for _, _, nm, *_ in base: lc[nm] = lc.get(nm, 0) + 1
+            data = {
+                "bot": "Mamulya Family",
+                "customers": nc,
+                "with_phone": n("select count(*) from customers where phone!=''"),
+                "orders_since_launch": orders_since,
+                "entered_from_sms": entered,
+                "gifts_chosen": n("select count(*) from gifts"),
+                "gifts_by_type": dict(DB.execute("select gift, count(*) from gifts group by gift").fetchall()),
+                "sources": dict(DB.execute("select coalesce(nullif(src,''),'—'), count(*) from customers group by 1").fetchall()),
+                "levels": {k: lc.get(k, 0) for k in ("Діамант", "VIP", "Смарт", "Базовий")},
+                "migration_sent": n("select count(*) from sent where key='mig1'"),
+                "migration_entered": n("select count(*) from legacy l where exists(select 1 from customers c where c.chat_id=l.chat_id)"),
+                "coupon_orders": dict(DB.execute(f"select case when coupon like 'MMBOT%' then 'MMBOT' when coupon like 'ZNBOT%' then 'ZNBOT' else coupon end, count(*) from orders where coupon!='' and ts>={LAUNCH} group by 1").fetchall()),
+                "ts": int(time.time()),
+            }
+            self.send_response(200); self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*"); self.end_headers()
+            self.wfile.write(json.dumps(data, ensure_ascii=False).encode()); return
         if u.path == "/sync" and authed:
             pages = int(qs.get("pages", ["1"])[0])
             threading.Thread(target=lambda: print("manual sync:", sync_orders(pages)), daemon=True).start()
