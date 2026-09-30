@@ -136,6 +136,8 @@ MARKETPLACE_FALLBACK = "Hubber та інші маркетплейси"  # усі
 # ponytail: рахуємо все живе одразу; DECLINED/Повернення/Скасований/TEST/Видалений випадають самі при зміні статусу (вебхук)
 
 BOT_COUPONS = ("FREESHIP", "MAMA150", "MMBOT", "ZNBOT", "FRIEND300", "FRIEND10", "LOVE7", "ANTIAGE10")
+# ponytail: welcome/промо-коди — діють на будь-яке замовлення, НЕ підпадають під правило «наступне після отриманого»
+WELCOME_COUPONS = {"LOVE7"}
 
 def coupon_in(o):
     # ponytail: SalesDrive кладе код по-різному (comment/certificate/payment) — шукаємо у всьому обʼєкті
@@ -149,7 +151,7 @@ def abuse_check(o):
         c0 = (o.get("contacts") or [{}])[0] if isinstance(o.get("contacts"), list) else {}
         phone = norm_phone((c0.get("phone") or [""])[0] if c0 else "")
         if not phone: return
-        if code:
+        if code and code not in WELCOME_COUPONS:
             prev = DB.execute("select order_id, status from orders where phone=? and order_id!=? and status in (1,2,3,4,10,11) order by ts desc limit 1", (phone, oid)).fetchone()
             # ponytail: SalesDrive шле вебхук на КОЖНУ зміну замовлення — алертимо раз на замовлення (dedup через sent)
             if prev and DB.execute("insert or ignore into sent values(0,?,?)", (f"abuse:{oid}", time.time())).rowcount:
