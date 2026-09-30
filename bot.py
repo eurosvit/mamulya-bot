@@ -151,7 +151,9 @@ def abuse_check(o):
         if not phone: return
         if code:
             prev = DB.execute("select order_id, status from orders where phone=? and order_id!=? and status in (1,2,3,4,10,11) order by ts desc limit 1", (phone, oid)).fetchone()
-            if prev:
+            # ponytail: SalesDrive шле вебхук на КОЖНУ зміну замовлення — алертимо раз на замовлення (dedup через sent)
+            if prev and DB.execute("insert or ignore into sent values(0,?,?)", (f"abuse:{oid}", time.time())).rowcount:
+                DB.commit()
                 for a in ADMINS: send(a, f"⚠️ <b>Підозра на обхід подарунків</b>\nЗамовлення №{oid} використовує купон <code>{code}</code>, а попереднє №{prev[0]} того ж телефону ({phone}) ще НЕ отримане.\nПеревірте при підтвердженні: купон діє на наступне замовлення після отримання першого.")
         if int(o.get("statusId") or 0) in (6, 13):
             used = DB.execute("select order_id from orders where phone=? and order_id!=?", (phone, oid)).fetchall()
