@@ -135,7 +135,7 @@ STORES = {94: "Mamulya.lviv", 97: "Mamulya.lviv", 134: "Mamulya.lviv", 120: "Mod
 MARKETPLACE_FALLBACK = "Hubber та інші маркетплейси"  # усі sajt поза мапою — це Hubber-канали
 # ponytail: рахуємо все живе одразу; DECLINED/Повернення/Скасований/TEST/Видалений випадають самі при зміні статусу (вебхук)
 
-BOT_COUPONS = ("FREESHIP", "MAMA150", "MMBOT", "ZNBOT", "FRIEND300", "FRIEND10", "LOVE7", "ANTIAGE10")
+BOT_COUPONS = ("FREESHIP", "MAMA150", "MMBOT", "ZNBOT", "LOVE7", "ANTIAGE10")
 # ponytail: welcome/промо-коди — діють на будь-яке замовлення, НЕ підпадають під правило «наступне після отриманого»
 WELCOME_COUPONS = {"LOVE7"}
 
