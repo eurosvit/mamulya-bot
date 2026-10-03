@@ -936,9 +936,11 @@ def admin_page():
         count(*), coalesce(sum(amount),0), coalesce(sum(case when status=5 then amount else 0 end),0)
         from orders where coupon!='' and ts>={LAUNCH} group by code order by 3 desc""")
     coup_use_rows = "".join(f"<tr><td>{CODE_UA.get(c, c)}</td><td class=n>{cnt}</td><td class=n>{tot:,.0f}</td><td class=n>{sold:,.0f}</td></tr>".replace(",", " ") for c, cnt, tot, sold in coup_use)
+    no_purchase = n("select count(*) from customers c where not exists(select 1 from orders o where o.phone=c.phone and o.status not in (6,7,13,15,8) and c.phone!='')")
     cards = [("Клієнтів у боті", nc), ("З номером", n("select count(*) from customers where phone!=''")),
+             ("Ще без покупок", no_purchase),
              ("Замовлень у базі", n("select count(*) from orders")), ("Подарунків", n("select count(*) from gifts")),
-             ("Активних купонів", n(f"select count(*) from coupons where expires>{now}")), ("Нагадувань", n("select count(*) from sent"))]
+             ("Активних купонів", n(f"select count(*) from coupons where expires>{now}"))]
 
     def rows(data, names=None, pct_of=None):
         mx = max([r[1] for r in data], default=1) or 1
