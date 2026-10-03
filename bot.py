@@ -451,6 +451,30 @@ def resolve_ids(seg):
         return [r[0] for r in DB.execute("select chat_id from customers where store=?", (STORE_ARG[seg],))]
     return [r[0] for r in DB.execute("select chat_id from customers")]
 
+def fmt(n): return f"{n:,.0f}".replace(",", " ")
+
+def personalize(body, cid):
+    # ponytail: заповнюємо {імя}/{сума}/{залишок}/{рівень}/{поточна} під кожного; немає токенів — повертаємо як є
+    if "{" not in body: return body
+    row = DB.execute("select coalesce(phone,'') from customers where chat_id=?", (cid,)).fetchone()
+    phone = row[0] if row else ""
+    name = ""
+    if phone:
+        r = DB.execute("select name from names where phone=?", (phone,)).fetchone()
+        if r and r[0]: name = r[0].split()[0]
+    if not name:
+        r = DB.execute("select name from legacy where chat_id=?", (cid,)).fetchone()
+        if r and r[0]: name = r[0].split()[0]
+    total = DB.execute("select coalesce(sum(amount),0) from orders where phone=? and status not in (6,7,13,15,8)", (phone,)).fetchone()[0] if phone else 0
+    cur, nxt = level_of(total)
+    repl = {"{імя}": name or "Мамо", "{ім'я}": name or "Мамо", "{name}": name or "Мамо",
+            "{сума}": fmt(total),
+            "{залишок}": fmt(nxt[0] - total) if nxt else "0",
+            "{рівень}": f"{nxt[1]}%" if nxt else f"{cur[1]}%" if cur else "",
+            "{поточна}": f"{cur[1]}%" if cur else "0%"}
+    for k, v in repl.items(): body = body.replace(k, v)
+    return body
+
 def run_broadcast(seg, body, btn, img=None):
     ids = resolve_ids(seg)
     cur = DB.execute("insert into posts(ts,target,text) values(?,?,?)", (time.time(), seg or "всі", body))
@@ -459,7 +483,8 @@ def run_broadcast(seg, body, btn, img=None):
     ok = 0
     for cid in ids:
         try:
-            send_photo_url(cid, img, body, kb) if img else send(cid, body, kb)
+            msg = personalize(body, cid)
+            send_photo_url(cid, img, msg, kb) if img else send(cid, msg, kb)
             ok += 1
             DB.execute("insert or ignore into sent values(?,?,?)", (cid, f"post:{pid}", time.time()))
         except Exception as e: print("bcast", e)
@@ -518,7 +543,7 @@ def on_text(chat_id, text):
             f"🎟 Вільних кодів −150: {n('select count(*) from pool where chat_id is null')}\n"
             f"📦 Замовлень у базі: {n('select count(*) from orders')}")
     if chat_id in ADMINS and t == "/post":
-        return send(chat_id, "Розсилка. Формат: <code>/post &lt;сегмент&gt; текст</code>\n\nСегменти:\n• <b>(без сегмента)</b> — усім у боті\n• <b>nobuy</b> — ще без покупок (дотиск до першої)\n• <b>buyers</b> — з покупками\n• <b>vip</b> — рівень VIP+ (від 15 000)\n• <b>sleeping</b> — купували, але тиша 60+ днів\n• <b>near</b> — лишилось ≤500 грн до наступного рівня\n• <b>doman</b> — малюки за віком + минулі покупці Ліполенд\n• <b>pregnant/m0_3/m3_6/m6_12/lipoland</b> — за стадією\n• <b>mamulya/modnamama/znana</b> — за магазином\n\n<b>Кнопка</b> (необовʼязково): додайте в кінці <code>|| текст | посилання</code> або ярлик магазину <code>|| mamulya</code> (modnamama/znana/antiage).\n<b>Фото</b> (необовʼязково): додайте в кінці <code>@img https://…jpg</code> (після кнопки).\n\nПриклади:\n<code>/post nobuy Знижка −7% чекає 💗 || mamulya</code>\n<code>/post doman Новинка! || mamulya @img https://mamulya.lviv.ua/…png</code>\n\n⏰ Запланувати: <code>/schedule 07.10 11:00 nobuy текст || mamulya</code> · список/скасування: <code>/schedule</code>")
+        return send(chat_id, "Розсилка. Формат: <code>/post &lt;сегмент&gt; текст</code>\n\nСегменти:\n• <b>(без сегмента)</b> — усім у боті\n• <b>nobuy</b> — ще без покупок (дотиск до першої)\n• <b>buyers</b> — з покупками\n• <b>vip</b> — рівень VIP+ (від 15 000)\n• <b>sleeping</b> — купували, але тиша 60+ днів\n• <b>near</b> — лишилось ≤500 грн до наступного рівня\n• <b>doman</b> — малюки за віком + минулі покупці Ліполенд\n• <b>pregnant/m0_3/m3_6/m6_12/lipoland</b> — за стадією\n• <b>mamulya/modnamama/znana</b> — за магазином\n\n<b>Кнопка</b> (необовʼязково): додайте в кінці <code>|| текст | посилання</code> або ярлик магазину <code>|| mamulya</code> (modnamama/znana/antiage).\n<b>Фото</b> (необовʼязково): додайте в кінці <code>@img https://…jpg</code> (після кнопки).\n\n<b>Персоналізація</b> — підставляються під кожного:\n<code>{імя}</code> імʼя (або «Мамо»), <code>{сума}</code> всього покупок, <code>{залишок}</code> грн до наступного рівня, <code>{рівень}</code> % наступного рівня, <code>{поточна}</code> % поточної знижки.\nНапр.: <code>/post near {імя}, лишилось {залишок} грн до знижки {рівень} 💗</code>\n\nПриклади:\n<code>/post nobuy Знижка −7% чекає 💗 || mamulya</code>\n<code>/post doman Новинка! || mamulya @img https://mamulya.lviv.ua/…png</code>\n\n⏰ Запланувати: <code>/schedule 07.10 11:00 nobuy текст || mamulya</code> · список/скасування: <code>/schedule</code>")
     if chat_id in ADMINS and (t == "/schedule" or t.startswith("/schedule ")):
         arg = t[9:].strip()
         if arg.startswith("cancel"):
@@ -548,7 +573,9 @@ def on_text(chat_id, text):
         cur = DB.execute("insert into scheduled(run_ts,seg,body,btn,img) values(?,?,?,?,?)", (run_ts, seg.lower(), body, btn_s, img or ""))
         DB.commit()
         when = time.strftime("%d.%m о %H:%M", time.localtime(run_ts))
-        return send(chat_id, f"✅ Заплановано #{cur.lastrowid} на <b>{when}</b>\nСегмент: <b>{seg.lower()}</b> (~{cnt} отримувачів)" + (" · з кнопкою" if btn else "") + (" · з фото" if img else "") + f"\n\nПревʼю:\n{body}")
+        prev = personalize(body, chat_id)
+        pnote = "\n\n<i>(приклад заповнення — на вашому імені й сумі; кожен отримає свої)</i>" if "{" in body else ""
+        return send(chat_id, f"✅ Заплановано #{cur.lastrowid} на <b>{when}</b>\nСегмент: <b>{seg.lower()}</b> (~{cnt} отримувачів)" + (" · з кнопкою" if btn else "") + (" · з фото" if img else "") + f"\n\nПревʼю:\n{prev}{pnote}")
     if chat_id in ADMINS and t == "/postold":
         n_ = DB.execute("select count(*) from legacy").fetchone()[0]
         lvl = near = zero = 0
