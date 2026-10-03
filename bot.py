@@ -195,7 +195,7 @@ def save_order(o, names=None):
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
             try: ots = time.mktime(time.strptime(raw, fmt)); break
             except Exception: pass
-    DB.execute("insert or replace into orders values(?,?,?,?,?,?,?,?)", (str(o.get("id")), phone, json.dumps(items, ensure_ascii=False), ots, float(o.get("paymentAmount") or 0), store, int(o.get("statusId") or 0), coupon_in(o) or "")); DB.commit()
+    DB.execute("insert or replace into orders(order_id,phone,items,ts,amount,store,status,coupon) values(?,?,?,?,?,?,?,?)", (str(o.get("id")), phone, json.dumps(items, ensure_ascii=False), ots, float(o.get("paymentAmount") or 0), store, int(o.get("statusId") or 0), coupon_in(o) or "")); DB.commit()
     return phone, items
 
 # ---------- gifts ----------
@@ -440,8 +440,13 @@ def resolve_ids(seg):
         sql = f"exists(select 1 from orders o where o.phone=c.phone and {SOLD_F}) and not exists(select 1 from orders o where o.phone=c.phone and {SOLD_F} and o.ts > {int(time.time())-60*86400})"
     elif seg == "near":
         # 0 < (поріг наступного рівня − сума) ≤ 1000, тобто вже є покупки й майже рівень
+        # виключаємо тих, у кого є замовлення «в дорозі» (оформлене, але ще не отримане) — рано нудити
         conds = " or ".join(f"(tot > {th-1000} and tot < {th})" for th in (4500, 9000, 15000, 25000))
-        rows = DB.execute(f"select chat_id from (select chat_id, (select coalesce(sum(o.amount),0) from orders o where o.phone=c.phone and {SOLD_F}) tot from customers c) where {conds}").fetchall()
+        rows = DB.execute(f"""select chat_id from (
+            select chat_id, (select coalesce(sum(o.amount),0) from orders o where o.phone=c.phone and {SOLD_F}) tot
+            from customers c
+            where not exists(select 1 from orders p where p.phone=c.phone and p.status in (1,2,3,4))
+        ) where {conds}""").fetchall()
         return [r[0] for r in rows]
     else:
         sql = None
