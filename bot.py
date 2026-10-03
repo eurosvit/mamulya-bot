@@ -929,6 +929,27 @@ class Hook(BaseHTTPRequestHandler):
             pages = int(qs.get("pages", ["1"])[0])
             threading.Thread(target=lambda: print("manual sync:", sync_orders(pages)), daemon=True).start()
             self.send_response(200); self.end_headers(); self.wfile.write(b"sync started"); return
+        if u.path == "/preview" and authed:
+            # тестова відправка трьох запланованих розсилок лише адмінам (сегменти не чіпаємо)
+            IMG = "https://mamulya.lviv.ua/uploads/shop/products/large/20e9abf2c47140a5ce2b2a3fd7163f01.png"
+            MAM = ("🛍 На Mamulya.lviv", "https://mamulya.lviv.ua")
+            PROD = ("Подивитись картки", "https://mamulya.lviv.ua/kartki-domana-lipoland-a6")
+            doman = "Новинка від Ліполенд — картки Домана! 💗 Це картки для раннього розвитку: малюк розглядає яскраві зображення й слова, тренує увагу, памʼять і мовлення з перших місяців. Формат А6 — компактні, зручно брати з собою. Саме для вашого віку 🤍"
+            nobuy = "Знаєте, що нас найбільше тішить? 💗 Вже понад 8 000 мам обрали нас для себе й свого малюка. А ваша знижка −7% на першу покупку досі чекає — промокод <b>LOVE7</b>. Якщо вагаєтесь із вибором — напишіть, залюбки підкажемо 🤍"
+            near_t = "{імя}, вам лишилось зовсім трохи 💗 Ще {залишок} грн покупок — і ви відкриваєте постійну знижку {рівень}, яка діє завжди й не згорає. Зараз у ваших покупках разом {сума} грн. Знижка застосовується автоматично, щойно ви залогінені на сайті 🤍 Перевірити рівень — кнопка «💎 Мій рівень» у боті."
+            sent = 0
+            for a in ADMINS:
+                try:
+                    send(a, "🔧 <b>Три тестові розсилки</b> (лише вам, сегменти не чіпала). Нижче — ПН (фото), ВТ, СР. У СР імʼя/сума/рівень підставляються під кожного:")
+                    send_photo_url(a, IMG, doman, [[PROD]])
+                    send(a, nobuy, [[MAM]])
+                    near = personalize(near_t, a)
+                    if "{сума} грн" in near or " 0 грн" in near:  # у адміна нема покупок у базі — показуємо приклад
+                        near = "Оля, вам лишилось зовсім трохи 💗 Ще 300 грн покупок — і ви відкриваєте постійну знижку 3%, яка діє завжди й не згорає. Зараз у ваших покупках разом 4 200 грн. Знижка застосовується автоматично, щойно ви залогінені на сайті 🤍 Перевірити рівень — кнопка «💎 Мій рівень» у боті.\n\n<i>(приклад заповнення — кожен клієнт отримає свої цифри)</i>"
+                    send(a, near, [[MAM]])
+                    sent += 1
+                except Exception as e: print("preview", e)
+            self.send_response(200); self.end_headers(); self.wfile.write(f"preview sent to {sent} admins".encode()); return
         if u.path == "/segments.csv" and authed:
             self.send_response(200); self.send_header("Content-Type", "text/csv; charset=utf-8"); self.end_headers()
             rows = ["phone;name;total;level;discount;next_level;to_next"]
