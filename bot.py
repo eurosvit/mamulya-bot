@@ -802,6 +802,9 @@ class Hook(BaseHTTPRequestHandler):
         if u.path == "/near" and authed:
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
             self.wfile.write(near_page().encode()); return
+        if u.path == "/posts" and authed:
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
+            self.wfile.write(posts_page().encode()); return
         if u.path == "/client" and authed:
             cid = int(qs.get("id", ["0"])[0])
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
@@ -884,6 +887,52 @@ td,th{{padding:7px 12px;border-bottom:1px solid #E8DCD8;text-align:left;vertical
 <table><tr><th>Дата</th><th>Повідомлення</th></tr>{"".join(tr(r) for r in plan) or tr(("—","для цієї стадії все надіслано"))}</table>
 <p style="color:#A1939A">Плюс службові: нагадування про купон за 5 днів до кінця дії (якщо є активний купон).</p>"""
 
+def posts_page():
+    AK = os.environ.get("ADMIN_KEY", "")
+    q = lambda sql, *a: DB.execute(sql, a).fetchall()
+    n = lambda sql, *a: DB.execute(sql, a).fetchone()[0]
+    SOLD = "status not in (6,7,13,15,8)"
+    SEG_UA = {"nobuy": "🆕 без покупок", "buyers": "💜 покупці", "vip": "⭐ VIP", "sleeping": "😴 сплячі",
+              "pregnant": "вагітність", "m0_3": "0–3 міс", "m3_6": "3–6 міс", "m6_12": "6–12 міс", "lipoland": "Lipoland",
+              "Mamulya.lviv": "Mamulya", "Modnamama": "Modnamama", "Znana Mama": "Znana", "всі": "усім"}
+    posts = q("select id, ts, target, text from posts order by ts desc limit 50")
+    rows = ""
+    tot_deliv = tot_ord = tot_rev = 0
+    for pid, ts, target, text in posts:
+        deliv = n("select count(*) from sent where key=?", f"post:{pid}")
+        # замовлення отримувачів протягом 7 днів після розсилки (атрибуція)
+        att = q(f"""select count(*), coalesce(sum(o.amount),0) from orders o
+            where o.{SOLD} and o.ts between ? and ?+7*86400
+            and o.phone in (select c.phone from customers c join sent s on s.chat_id=c.chat_id where s.key=? and c.phone!='')""",
+            ts, ts, f"post:{pid}")
+        orders, rev = att[0] if att else (0, 0)
+        tot_deliv += deliv; tot_ord += orders; tot_rev += rev
+        when = time.strftime("%d.%m %H:%M", time.localtime(ts))
+        conv = f"{orders/deliv*100:.0f}%" if deliv else "—"
+        rows += f"<tr><td>{when}</td><td>{SEG_UA.get(target, target)}</td><td class=n>{deliv}</td><td class=n>{orders}</td><td class=n>{conv}</td><td class=n>{rev:,.0f}".replace(",", " ") + f"</td><td style=max-width:280px;white-space:normal;color:#6E5F65>{text[:90]}</td></tr>"
+    # розріз по магазинах: замовлення отримувачів усіх розсилок, 7 днів, по магазину
+    by_store = q(f"""select o.store, count(*), coalesce(sum(o.amount),0) from orders o
+        join sent s on s.key like 'post:%'
+        join customers c on c.chat_id=s.chat_id and c.phone=o.phone
+        where o.{SOLD} and o.ts between s.ts and s.ts+7*86400 and o.store!=''
+        group by o.store order by 3 desc""")
+    store_rows = "".join(f"<tr><td>{st}</td><td class=n>{c}</td><td class=n>{r:,.0f}".replace(",", " ") + "</td></tr>" for st, c, r in by_store) or "<tr><td>поки нема</td></tr>"
+    cards = [("Розсилок", len(posts)), ("Доставлено", tot_deliv), ("Замовлень після (7д)", tot_ord), ("Оборот, грн", f"{tot_rev:,.0f}".replace(",", " "))]
+    return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Розсилки — Mamulya Bot</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
+{CAB_CSS}
+<div class=top><h1>💗 Розсилки</h1><span class=upd>оновлено {time.strftime("%d.%m %H:%M")}</span></div>
+{_nav("Розсилки", AK)}
+<div class=tiles>{"".join(f'<div class=tile><b>{v}</b><span>{k}</span></div>' for k, v in cards)}</div>
+<div class=grid>
+<section class="p wide"><h2>Надіслані розсилки <small>останні 50 · замовлення/оборот — отримувачі протягом 7 днів після</small></h2>
+<table><tr><th>Коли</th><th>Сегмент</th><th>Доставлено</th><th>Замовлень</th><th>Конв.</th><th>Оборот</th><th>Текст</th></tr>{rows or '<tr><td>ще не було розсилок — надішліть /post у боті</td></tr>'}</table></section>
+<section class="p"><h2>Результат по магазинах <small>замовлення отримувачів розсилок, 7 днів</small></h2>
+<table><tr><th>Магазин</th><th>Замовлень</th><th>Оборот</th></tr>{store_rows}</table></section>
+<section class="p"><h2>Заплановані</h2><p style=color:#6E5F65;font-size:12.5px>Розсилки надсилаються вручну командою <code>/post сегмент текст</code> у боті. План по тижнях — в документі «План розсилок». Автопланувальник (бот сам шле щочетверга) — додамо, коли тексти підтвердяться на практиці.</p></section>
+</div></html>"""
+
 def near_page():
     AK = os.environ.get("ADMIN_KEY", "")
     base = base_levels()
@@ -900,6 +949,36 @@ td.n{{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}}a{{
 <h1>«Трішки до рівня» ≤1000 грн — {len(near)} клієнтів</h1>
 <p style=color:#6E5F65;font-size:13px>Найгарячіший сегмент для SMS: маленька сума до постійної знижки. <a href="/segments.csv?key={AK}">Вивантажити CSV ↓</a></p>
 <table><tr><th>Телефон</th><th>Імʼя</th><th>Сума</th><th>Рівень</th><th>До наступного</th><th>Наступний</th></tr>{rows}</table>"""
+
+CAB_CSS = """<style>
+:root{--bg:#F7F2F0;--card:#FFF;--line:#EADFDB;--ink:#2B2226;--ink2:#6E5F65;--ink3:#A1939A;--acc:#B8325A;--acc-dim:#F8E4EA}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:13.5px/1.45 "Golos Text",system-ui,sans-serif;padding:20px}
+.top{display:flex;align-items:baseline;gap:12px;max-width:1100px;margin:0 auto 14px}
+h1{font-size:19px;font-weight:700;margin:0}.upd{color:var(--ink3);font-size:12px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;max-width:1100px;margin:0 auto 14px}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+.tile b{display:block;font-size:20px;font-variant-numeric:tabular-nums}.tile span{font-size:10.5px;color:var(--ink3);text-transform:uppercase;letter-spacing:.04em}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px;max-width:1100px;margin:0 auto}
+.p{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;overflow-x:auto}
+.p.wide{grid-column:1/-1}
+h2{font-size:13px;font-weight:600;margin:0 0 8px;color:var(--ink2)}
+h2 small{font-weight:400;color:var(--ink3)}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+td,th{padding:4px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+tr:last-child td{border-bottom:0}th{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink3)}
+td.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+td.b{width:34%}td.b i{display:block;height:6px;background:var(--acc);border-radius:3px;min-width:2px}
+tr.sub td{color:var(--ink2);font-size:12px;padding-left:20px}
+a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
+code{font-size:11.5px;background:var(--acc-dim);padding:0 4px;border-radius:4px}
+details.p summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--ink2)}
+details.p[open] summary{margin-bottom:8px}
+.nav{display:flex;gap:6px;margin:0 auto 14px;max-width:1100px}.nav a{padding:6px 14px;border-radius:8px;font-size:13px;font-weight:600;color:#6E5F65;background:#fff;border:1px solid #EADFDB}.nav a.on{background:#B8325A;color:#fff;border-color:#B8325A}
+</style>"""
+
+def _nav(active, AK):
+    tabs = [("Огляд", f"/admin?key={AK}"), ("Розсилки", f"/posts?key={AK}")]
+    return '<div class=nav>' + "".join(f'<a class="{"on" if active==lbl else ""}" href="{url}">{lbl}</a>' for lbl, url in tabs) + '</div>'
 
 def admin_page():
     AK = os.environ.get("ADMIN_KEY", "")
@@ -1027,32 +1106,10 @@ def admin_page():
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Mamulya Bot — кабінет</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
-<style>
-:root{{--bg:#F7F2F0;--card:#FFF;--line:#EADFDB;--ink:#2B2226;--ink2:#6E5F65;--ink3:#A1939A;--acc:#B8325A;--acc-dim:#F8E4EA}}
-*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--ink);font:13.5px/1.45 "Golos Text",system-ui,sans-serif;padding:20px}}
-.top{{display:flex;align-items:baseline;gap:12px;max-width:1100px;margin:0 auto 14px}}
-h1{{font-size:19px;font-weight:700;margin:0}}.upd{{color:var(--ink3);font-size:12px}}
-.tiles{{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;max-width:1100px;margin:0 auto 14px}}
-.tile{{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px}}
-.tile b{{display:block;font-size:20px;font-variant-numeric:tabular-nums}}.tile span{{font-size:10.5px;color:var(--ink3);text-transform:uppercase;letter-spacing:.04em}}
-.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px;max-width:1100px;margin:0 auto}}
-.p{{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;overflow-x:auto}}
-.p.wide{{grid-column:1/-1}}
-h2{{font-size:13px;font-weight:600;margin:0 0 8px;color:var(--ink2)}}
-h2 small{{font-weight:400;color:var(--ink3)}}
-table{{border-collapse:collapse;width:100%;font-size:12.5px}}
-td,th{{padding:4px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}}
-tr:last-child td{{border-bottom:0}}th{{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink3)}}
-td.n{{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}}
-td.b{{width:34%}}td.b i{{display:block;height:6px;background:var(--acc);border-radius:3px;min-width:2px}}
-tr.sub td{{color:var(--ink2);font-size:12px;padding-left:20px}}
-a{{color:var(--acc);text-decoration:none}}a:hover{{text-decoration:underline}}
-code{{font-size:11.5px;background:var(--acc-dim);padding:0 4px;border-radius:4px}}
-details.p summary{{cursor:pointer;font-size:13px;font-weight:600;color:var(--ink2)}}
-details.p[open] summary{{margin-bottom:8px}}
-</style>
+{CAB_CSS}
 <div class=top><h1>💗 Mamulya Bot</h1><span class=upd>оновлено {time.strftime("%d.%m %H:%M")}</span>
 <span class=upd style=margin-left:auto><a href="/segments.csv?key={AK}">CSV сегментів ↓</a></span></div>
+{_nav("Огляд", AK)}
 <div class=tiles>{"".join(f"<div class=tile><b>{v}</b><span>{k}</span></div>" for k, v in cards)}</div>
 <div class=grid>
 {panel("Воронка · SMS → бот → подарунки <small>лише магазини програми</small>", f"<table>{fun}</table>")}
