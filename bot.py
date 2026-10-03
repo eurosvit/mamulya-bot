@@ -25,6 +25,7 @@ create table if not exists legacy(chat_id integer primary key, name text, phone 
 create table if not exists pool(code text primary key, chat_id int, ts real);
 create table if not exists names(phone text primary key, name text);
 create table if not exists b2b(phone text primary key);
+create table if not exists scheduled(id integer primary key autoincrement, run_ts real, seg text, body text, btn text, done int default 0, sent int default 0, total int default 0, img text default '');
 """)
 try: DB.execute("alter table orders add column amount real default 0")
 except Exception: pass
@@ -41,6 +42,8 @@ except Exception: pass
 try: DB.execute("alter table orders add column status int default 0")
 except Exception: pass
 try: DB.execute("alter table customers add column src text default ''")
+except Exception: pass
+try: DB.execute("alter table scheduled add column img text default ''")
 except Exception: pass
 DB.execute("update customers set src='migrate' where coalesce(src,'')='' and chat_id in (select chat_id from legacy)")
 DB.execute("update customers set src='sms' where coalesce(src,'')='' and coalesce(order_id,'') not in ('', 'demo', 'web', 'migrate', 'qr')")
@@ -99,6 +102,17 @@ def send_photo(chat_id, path, caption):
             f"--{bd}\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"qr.png\"\r\nContent-Type: image/png\r\n\r\n").encode() + b + f"\r\n--{bd}--\r\n".encode()
     req = urllib.request.Request(API + "sendPhoto", body, {"Content-Type": f"multipart/form-data; boundary={bd}"})
     return json.load(urllib.request.urlopen(req, timeout=30))
+
+def send_photo_url(chat_id, photo_url, caption, buttons=None):
+    # ponytail: фото за URL — Telegram сам тягне; для розсилок замість завантаження файлу
+    kw = dict(chat_id=chat_id, photo=photo_url, caption=caption[:1024], parse_mode="HTML")
+    if buttons:
+        kw["reply_markup"] = {"inline_keyboard": [[
+            {"text": t, **({"url": d} if d.startswith("http") else {"callback_data": d})} for t, d in row] for row in buttons]}
+    r = tg("sendPhoto", **kw)
+    if len(caption) > 1024:  # підпис обрізався — дошлемо хвіст окремим повідомленням
+        send(chat_id, caption[1024:])
+    return r
 
 def norm_phone(p):
     d = "".join(c for c in str(p) if c.isdigit())
@@ -267,6 +281,43 @@ def show_menu(chat_id, stage):
         options = [g for g in options if g["id"] != "antiage"]
     send(chat_id, T["menu_header"].format(left=2 - picked), [[(g["label"], "gift:" + g["id"])] for g in options])
 
+def znana_api(path, body=None):
+    req = urllib.request.Request("https://znana-stock.onrender.com" + path,
+                                 json.dumps(body).encode() if body is not None else None,
+                                 {"Content-Type": "application/json", "x-secret": os.environ.get("ZNANA_SECRET", "")})
+    return json.load(urllib.request.urlopen(req, timeout=30))
+
+def ask_reviews():
+    """Просимо відгук у тих, кому замовлення вже доставили. Склад знає, кому
+    пора; ми знаємо, в який чат це написати. Кого в боті немає — показуємо
+    менеджеру, хай надішле у Viber: таких поки більшість."""
+    if not os.environ.get("ZNANA_SECRET"): return
+    try: asks = znana_api("/api/reviews/asks?days=10")
+    except Exception as e: return print("review asks", e)
+    done, manual = [], []
+    for a in asks:
+        phone = norm_phone(a.get("phone"))
+        row = DB.execute("select chat_id from customers where phone=? order by created desc limit 1", (phone,)).fetchone()
+        link = f"https://znanamama.com.ua/vidhuk/{a['token']}?utm_source=telegram&utm_medium=bot"
+        what = ", ".join(i["name"] for i in a.get("items", [])[:2]) or "замовлення"
+        if row:
+            try:
+                send(row[0], T["zn_review"].format(name=a.get("name") or "", what=what),
+                     [[("Залишити відгук", link)]])
+                done.append(a["token"])
+            except Exception as e: print("review send", e)
+        else:
+            manual.append(f"{a.get('name') or '—'} {phone}\n{what}\n{link}")
+    if manual:
+        for adm in ADMINS:
+            try: send(adm, "📝 Попросіть відгук (цих людей немає в боті):\n\n" + "\n\n".join(manual[:10]))
+            except Exception: pass
+        done += [a["token"] for a in asks if not DB.execute(
+            "select 1 from customers where phone=?", (norm_phone(a.get("phone")),)).fetchone()]
+    if done:
+        try: znana_api("/api/reviews/asked", {"tokens": done})
+        except Exception as e: print("review asked", e)
+
 # ---------- handlers ----------
 def znana_welcome(chat_id):
     """Вітальна знижка з попапа на сайті. Видаємо до покупки й один раз на людину:
@@ -350,6 +401,71 @@ def stage_from_dob(dob):
     months = (today - bd).days / 30.44
     return "m0_3" if months < 3 else "m3_6" if months < 6 else "m6_12" if months < 12 else "lipoland"
 
+SHOP_BTN = {"mamulya": ("🛍 На Mamulya.lviv", "https://mamulya.lviv.ua"),
+            "modnamama": ("🛍 На Modnamama", "https://modnamama.ua"),
+            "znana": ("🛍 На Znana Mama", "https://znanamama.com.ua"),
+            "antiage": ("🛍 На AntiAge", "https://antiagecosmetics.com.ua")}
+STORE_ARG = {"mamulya": "Mamulya.lviv", "modnamama": "Modnamama", "znana": "Znana Mama"}
+SOLD_F = "status not in (6,7,13,15,8)"
+
+def parse_button(body):
+    img = None
+    if "@img" in body:
+        body, _, img = body.partition("@img"); body = body.strip(); img = img.strip() or None
+    btn = None
+    if "||" in body:
+        body, _, raw = body.partition("||"); body = body.strip(); raw = raw.strip()
+        if raw.lower() in SHOP_BTN: btn = SHOP_BTN[raw.lower()]
+        elif "|" in raw:
+            lbl, _, url = raw.partition("|"); btn = (lbl.strip(), url.strip())
+    return body, btn, img
+
+def resolve_ids(seg):
+    seg = (seg or "").lower()
+    if seg == "doman":
+        # Картки Домана / Ліполенд: малюки за віком (усі baby-стадії + lipoland) АБО минулі покупці бренду Ліполенд
+        rows = DB.execute(f"""select chat_id from customers c where c.stage in ('m0_3','m3_6','m6_12','lipoland')
+            or exists(select 1 from orders o where o.phone=c.phone and {SOLD_F}
+                and (lower(o.items) like '%lipoland%' or o.items like '%іполенд%' or o.items like '%омана%'))""").fetchall()
+        return [r[0] for r in rows]
+    if seg == "nobuy":
+        sql = f"c.phone='' or not exists(select 1 from orders o where o.phone=c.phone and {SOLD_F})"
+    elif seg == "vip":
+        sql = f"(select coalesce(sum(o.amount),0) from orders o where o.phone=c.phone and {SOLD_F}) >= 15000"
+    elif seg == "buyers":
+        sql = f"exists(select 1 from orders o where o.phone=c.phone and {SOLD_F})"
+    elif seg == "sleeping":
+        sql = f"exists(select 1 from orders o where o.phone=c.phone and {SOLD_F}) and not exists(select 1 from orders o where o.phone=c.phone and {SOLD_F} and o.ts > {int(time.time())-60*86400})"
+    elif seg == "near":
+        # 0 < (поріг наступного рівня − сума) ≤ 500, тобто вже є покупки й майже рівень
+        conds = " or ".join(f"(tot > {th-500} and tot < {th})" for th in (4500, 9000, 15000, 25000))
+        rows = DB.execute(f"select chat_id from (select chat_id, (select coalesce(sum(o.amount),0) from orders o where o.phone=c.phone and {SOLD_F}) tot from customers c) where {conds}").fetchall()
+        return [r[0] for r in rows]
+    else:
+        sql = None
+    if sql:
+        return [r[0] for r in DB.execute(f"select chat_id from customers c where {sql}")]
+    if seg in LIFECYCLE:
+        return [r[0] for r in DB.execute("select chat_id from customers where stage=?", (seg,))]
+    if seg in STORE_ARG:
+        return [r[0] for r in DB.execute("select chat_id from customers where store=?", (STORE_ARG[seg],))]
+    return [r[0] for r in DB.execute("select chat_id from customers")]
+
+def run_broadcast(seg, body, btn, img=None):
+    ids = resolve_ids(seg)
+    cur = DB.execute("insert into posts(ts,target,text) values(?,?,?)", (time.time(), seg or "всі", body))
+    pid = cur.lastrowid; DB.commit()
+    kb = [[btn]] if btn else None
+    ok = 0
+    for cid in ids:
+        try:
+            send_photo_url(cid, img, body, kb) if img else send(cid, body, kb)
+            ok += 1
+            DB.execute("insert or ignore into sent values(?,?,?)", (cid, f"post:{pid}", time.time()))
+        except Exception as e: print("bcast", e)
+    DB.commit()
+    return ok, len(ids)
+
 def on_text(chat_id, text):
     t = text.strip()
     if t == "🎁 Подарунки":
@@ -402,7 +518,37 @@ def on_text(chat_id, text):
             f"🎟 Вільних кодів −150: {n('select count(*) from pool where chat_id is null')}\n"
             f"📦 Замовлень у базі: {n('select count(*) from orders')}")
     if chat_id in ADMINS and t == "/post":
-        return send(chat_id, "Розсилка. Формат: <code>/post &lt;сегмент&gt; текст</code>\n\nСегменти:\n• <b>(без сегмента)</b> — усім у боті\n• <b>nobuy</b> — ще без покупок (дотиск до першої)\n• <b>buyers</b> — з покупками\n• <b>vip</b> — рівень VIP+ (від 15 000)\n• <b>sleeping</b> — купували, але тиша 60+ днів\n• <b>pregnant/m0_3/m3_6/m6_12/lipoland</b> — за стадією\n• <b>mamulya/modnamama/znana</b> — за магазином\n\n<b>Кнопка</b> (необовʼязково): додайте в кінці <code>|| текст | посилання</code> або ярлик магазину <code>|| mamulya</code> (modnamama/znana/antiage).\n\nПриклади:\n<code>/post nobuy Знижка −7% чекає 💗 || mamulya</code>\n<code>/post buyers Нова колекція! || Подивитись | https://modnamama.ua/new</code>")
+        return send(chat_id, "Розсилка. Формат: <code>/post &lt;сегмент&gt; текст</code>\n\nСегменти:\n• <b>(без сегмента)</b> — усім у боті\n• <b>nobuy</b> — ще без покупок (дотиск до першої)\n• <b>buyers</b> — з покупками\n• <b>vip</b> — рівень VIP+ (від 15 000)\n• <b>sleeping</b> — купували, але тиша 60+ днів\n• <b>near</b> — лишилось ≤500 грн до наступного рівня\n• <b>doman</b> — малюки за віком + минулі покупці Ліполенд\n• <b>pregnant/m0_3/m3_6/m6_12/lipoland</b> — за стадією\n• <b>mamulya/modnamama/znana</b> — за магазином\n\n<b>Кнопка</b> (необовʼязково): додайте в кінці <code>|| текст | посилання</code> або ярлик магазину <code>|| mamulya</code> (modnamama/znana/antiage).\n<b>Фото</b> (необовʼязково): додайте в кінці <code>@img https://…jpg</code> (після кнопки).\n\nПриклади:\n<code>/post nobuy Знижка −7% чекає 💗 || mamulya</code>\n<code>/post doman Новинка! || mamulya @img https://mamulya.lviv.ua/…png</code>\n\n⏰ Запланувати: <code>/schedule 07.10 11:00 nobuy текст || mamulya</code> · список/скасування: <code>/schedule</code>")
+    if chat_id in ADMINS and (t == "/schedule" or t.startswith("/schedule ")):
+        arg = t[9:].strip()
+        if arg.startswith("cancel"):
+            try: sid = int(arg.split()[1])
+            except Exception: return send(chat_id, "Формат: /schedule cancel &lt;id&gt;")
+            DB.execute("delete from scheduled where id=? and done=0", (sid,)); DB.commit()
+            return send(chat_id, f"Заплановану розсилку #{sid} скасовано.")
+        if not arg:
+            rows = DB.execute("select id,run_ts,seg,done,sent,total from scheduled order by run_ts desc limit 20").fetchall()
+            if not rows: return send(chat_id, "Запланованих розсилок нема.\nФормат: <code>/schedule 07.10 11:00 nobuy текст || mamulya</code>")
+            out = ["⏰ <b>Заплановані розсилки</b>"]
+            for sid, rts, seg, done, snt, tot in rows:
+                when = time.strftime("%d.%m %H:%M", time.localtime(rts))
+                st = f"✅ {snt}/{tot}" if done else "⏳ очікує"
+                out.append(f"#{sid} · {when} · {seg or 'всі'} · {st}" + ("" if done else f" · <code>/schedule cancel {sid}</code>"))
+            return send(chat_id, "\n".join(out))
+        m = re.match(r"(\d{1,2})\.(\d{1,2})\s+(\d{1,2}):(\d{2})\s+(\S+)\s+(.+)", arg, re.S)
+        if not m: return send(chat_id, "Формат: <code>/schedule ДД.ММ ГГ:ХХ сегмент текст || кнопка</code>")
+        d, mo, hh, mm, seg, rest = m.groups()
+        yr = time.localtime().tm_year
+        try: run_ts = time.mktime((yr, int(mo), int(d), int(hh), int(mm), 0, 0, 0, -1))
+        except Exception: return send(chat_id, "Не зрозумів дату.")
+        if run_ts < time.time(): run_ts = time.mktime((yr + 1, int(mo), int(d), int(hh), int(mm), 0, 0, 0, -1))
+        body, btn, img = parse_button(rest.strip())
+        btn_s = "|".join(btn) if btn else ""
+        cnt = len(resolve_ids(seg.lower()))
+        cur = DB.execute("insert into scheduled(run_ts,seg,body,btn,img) values(?,?,?,?,?)", (run_ts, seg.lower(), body, btn_s, img or ""))
+        DB.commit()
+        when = time.strftime("%d.%m о %H:%M", time.localtime(run_ts))
+        return send(chat_id, f"✅ Заплановано #{cur.lastrowid} на <b>{when}</b>\nСегмент: <b>{seg.lower()}</b> (~{cnt} отримувачів)" + (" · з кнопкою" if btn else "") + (" · з фото" if img else "") + f"\n\nПревʼю:\n{body}")
     if chat_id in ADMINS and t == "/postold":
         n_ = DB.execute("select count(*) from legacy").fetchone()[0]
         lvl = near = zero = 0
@@ -440,50 +586,12 @@ def on_text(chat_id, text):
         DB.executemany("insert or ignore into pool(code) values(?)", [(c,) for c in t.split()[1:]]); DB.commit()
         return send(chat_id, f"Додано. У пулі вільних: {DB.execute('select count(*) from pool where chat_id is null').fetchone()[0]}")
     if chat_id in ADMINS and t.startswith("/post"):
-        # /post текст — усім; /post m3_6 текст — тільки стадії
         parts = t.split(" ", 2)
-        STORE_ARG = {"mamulya": "Mamulya.lviv", "modnamama": "Modnamama", "znana": "Znana Mama"}
-        SOLD_F = "status not in (6,7,13,15,8)"
         seg = parts[1].lower() if len(parts) > 2 else None
-        stage = parts[1] if len(parts) > 2 and parts[1] in LIFECYCLE else None
-        store = STORE_ARG.get(seg) if len(parts) > 2 else None
         body = parts[2] if seg else t[5:].strip()
-        SHOP_BTN = {"mamulya": ("🛍 На Mamulya.lviv", "https://mamulya.lviv.ua"),
-                    "modnamama": ("🛍 На Modnamama", "https://modnamama.ua"),
-                    "znana": ("🛍 На Znana Mama", "https://znanamama.com.ua"),
-                    "antiage": ("🛍 На AntiAge", "https://antiagecosmetics.com.ua")}
-        post_btn = None
-        if "||" in body:
-            body, _, btn_raw = body.partition("||")
-            body = body.strip(); btn_raw = btn_raw.strip()
-            if btn_raw.lower() in SHOP_BTN: post_btn = SHOP_BTN[btn_raw.lower()]
-            elif "|" in btn_raw:
-                lbl, _, url = btn_raw.partition("|"); post_btn = (lbl.strip(), url.strip())
-        phones_sql = None  # сегменти за покупками рахуються по телефону
-        if seg == "nobuy":
-            phones_sql = f"c.phone='' or not exists(select 1 from orders o where o.phone=c.phone and {SOLD_F})"
-        elif seg == "vip":
-            phones_sql = f"(select coalesce(sum(o.amount),0) from orders o where o.phone=c.phone and {SOLD_F}) >= 15000"
-        elif seg == "buyers":
-            phones_sql = f"exists(select 1 from orders o where o.phone=c.phone and {SOLD_F})"
-        elif seg == "sleeping":
-            phones_sql = f"exists(select 1 from orders o where o.phone=c.phone and {SOLD_F}) and not exists(select 1 from orders o where o.phone=c.phone and {SOLD_F} and o.ts > {int(time.time())-60*86400})"
-        if phones_sql:
-            ids = [r[0] for r in DB.execute(f"select chat_id from customers c where {phones_sql}")]
-        elif stage: ids = [r[0] for r in DB.execute("select chat_id from customers where stage=?", (stage,))]
-        elif store: ids = [r[0] for r in DB.execute("select chat_id from customers where store=?", (store,))]
-        else: ids = [r[0] for r in DB.execute("select chat_id from customers")]
-        cur = DB.execute("insert into posts(ts,target,text) values(?,?,?)", (time.time(), seg or "всі", body))
-        pid = cur.lastrowid; DB.commit()
-        kb = [[post_btn]] if post_btn else None
-        ok = 0
-        for cid in ids:
-            try:
-                send(cid, body, kb); ok += 1
-                DB.execute("insert or ignore into sent values(?,?,?)", (cid, f"post:{pid}", time.time()))
-            except Exception as e: print("post", e)
-        DB.commit()
-        return send(chat_id, f"Надіслано {ok}/{len(ids)}" + (" (з кнопкою)" if post_btn else ""))
+        body, btn, img = parse_button(body)
+        ok, total = run_broadcast(seg, body, btn, img)
+        return send(chat_id, f"Надіслано {ok}/{total}" + (" (з кнопкою)" if btn else "") + (" (з фото)" if img else ""))
     if t.lower().strip("!. ") in ("подарунок", "це подарунок", "на подарунок", "купувала на подарунок"):
         DB.execute("update customers set stage='unknown', dob='' where chat_id=?", (chat_id,)); DB.commit()
         return send(chat_id, "Зрозуміла 🎁 Вікових порад не надсилатиму — лише найкорисніше зрідка. Подарунки і купони працюють як завжди!")
@@ -686,8 +794,21 @@ def cron():
             except Exception as e: print("remind", e)
             DB.execute("update coupons set reminded=1 where code=?", (code,))
         DB.commit()
+        for sid, seg, body, btn_s, img in DB.execute("select id,seg,body,btn,coalesce(img,'') from scheduled where done=0 and run_ts<=?", (now,)).fetchall():
+            btn = tuple(btn_s.split("|", 1)) if btn_s else None
+            try:
+                ok, total = run_broadcast(seg or None, body, btn, img or None)
+                DB.execute("update scheduled set done=1, sent=?, total=? where id=?", (ok, total, sid))
+                for a in ADMINS:
+                    try: send(a, f"📬 Заплановану розсилку надіслано: {ok}/{total} ({seg or 'всі'})")
+                    except Exception: pass
+            except Exception as e:
+                print("sched", e); DB.execute("update scheduled set done=1 where id=?", (sid,))
+        DB.commit()
         try: sync_orders(1)
         except Exception as e: print("sync", e)
+        try: ask_reviews()
+        except Exception as e: print("reviews", e)
         time.sleep(3600)
 
 # ---------- SalesDrive webhook ----------
@@ -892,7 +1013,7 @@ def posts_page():
     q = lambda sql, *a: DB.execute(sql, a).fetchall()
     n = lambda sql, *a: DB.execute(sql, a).fetchone()[0]
     SOLD = "status not in (6,7,13,15,8)"
-    SEG_UA = {"nobuy": "🆕 без покупок", "buyers": "💜 покупці", "vip": "⭐ VIP", "sleeping": "😴 сплячі",
+    SEG_UA = {"nobuy": "🆕 без покупок", "buyers": "💜 покупці", "vip": "⭐ VIP", "sleeping": "😴 сплячі", "near": "✨ за крок до рівня", "doman": "🧒 Домана/Ліполенд",
               "pregnant": "вагітність", "m0_3": "0–3 міс", "m3_6": "3–6 міс", "m6_12": "6–12 міс", "lipoland": "Lipoland",
               "Mamulya.lviv": "Mamulya", "Modnamama": "Modnamama", "Znana Mama": "Znana", "всі": "усім"}
     posts = q("select id, ts, target, text from posts order by ts desc limit 50")
@@ -917,6 +1038,12 @@ def posts_page():
         where o.{SOLD} and o.ts between s.ts and s.ts+7*86400 and o.store!=''
         group by o.store order by 3 desc""")
     store_rows = "".join(f"<tr><td>{st}</td><td class=n>{c}</td><td class=n>{r:,.0f}".replace(",", " ") + "</td></tr>" for st, c, r in by_store) or "<tr><td>поки нема</td></tr>"
+    sched = q("select id, run_ts, seg, body, btn, done, sent, total from scheduled order by done, run_ts")
+    sched_rows = ""
+    for sid, rts, seg, body, btn, done, snt, tot in sched:
+        when = time.strftime("%d.%m %H:%M", time.localtime(rts))
+        st = f"✅ надіслано {snt}/{tot}" if done else f"⏳ очікує · ~{len(resolve_ids((seg or '').lower()))} отримувачів"
+        sched_rows += f"<tr><td>#{sid}</td><td>{when}</td><td>{SEG_UA.get(seg, seg or 'усі')}</td><td>{st}</td><td style=max-width:280px;white-space:normal;color:#6E5F65>{(body or '')[:90]}" + ("  🔘" if btn else "") + "</td></tr>"
     cards = [("Розсилок", len(posts)), ("Доставлено", tot_deliv), ("Замовлень після (7д)", tot_ord), ("Оборот, грн", f"{tot_rev:,.0f}".replace(",", " "))]
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Розсилки — Mamulya Bot</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
@@ -930,7 +1057,8 @@ def posts_page():
 <table><tr><th>Коли</th><th>Сегмент</th><th>Доставлено</th><th>Замовлень</th><th>Конв.</th><th>Оборот</th><th>Текст</th></tr>{rows or '<tr><td>ще не було розсилок — надішліть /post у боті</td></tr>'}</table></section>
 <section class="p"><h2>Результат по магазинах <small>замовлення отримувачів розсилок, 7 днів</small></h2>
 <table><tr><th>Магазин</th><th>Замовлень</th><th>Оборот</th></tr>{store_rows}</table></section>
-<section class="p"><h2>Заплановані</h2><p style=color:#6E5F65;font-size:12.5px>Розсилки надсилаються вручну командою <code>/post сегмент текст</code> у боті. План по тижнях — в документі «План розсилок». Автопланувальник (бот сам шле щочетверга) — додамо, коли тексти підтвердяться на практиці.</p></section>
+<section class="p wide"><h2>Заплановані <small>бот надішле сам у вказаний час · керування: <code>/schedule</code> у боті</small></h2>
+<table><tr><th>ID</th><th>Коли</th><th>Сегмент</th><th>Статус</th><th>Текст</th></tr>{sched_rows or '<tr><td>нема запланованих — додайте <code>/schedule ДД.ММ ГГ:ХХ сегмент текст</code></td></tr>'}</table></section>
 </div></html>"""
 
 def near_page():
