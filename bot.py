@@ -302,7 +302,7 @@ def ask_reviews():
         what = ", ".join(i["name"] for i in a.get("items", [])[:2]) or "замовлення"
         if row:
             try:
-                send(row[0], T["zn_review"].format(name=a.get("name") or "", what=what),
+                send(row[0], T["zn_review"].format(name=a.get("name") or "Вітаємо", what=what),
                      [[("Залишити відгук", link)]])
                 done.append(a["token"])
             except Exception as e: print("review send", e)
