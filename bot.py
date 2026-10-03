@@ -402,7 +402,7 @@ def on_text(chat_id, text):
             f"🎟 Вільних кодів −150: {n('select count(*) from pool where chat_id is null')}\n"
             f"📦 Замовлень у базі: {n('select count(*) from orders')}")
     if chat_id in ADMINS and t == "/post":
-        return send(chat_id, "Розсилка. Формат: <code>/post &lt;сегмент&gt; текст</code>\n\nСегменти:\n• <b>(без сегмента)</b> — усім у боті\n• <b>nobuy</b> — ще без покупок (дотиск до першої)\n• <b>buyers</b> — з покупками\n• <b>vip</b> — рівень VIP+ (від 15 000)\n• <b>sleeping</b> — купували, але тиша 60+ днів\n• <b>pregnant/m0_3/m3_6/m6_12/lipoland</b> — за стадією\n• <b>mamulya/modnamama/znana</b> — за магазином\n\nПриклад: <code>/post nobuy Ваша знижка −7% досі чекає 💗</code>")
+        return send(chat_id, "Розсилка. Формат: <code>/post &lt;сегмент&gt; текст</code>\n\nСегменти:\n• <b>(без сегмента)</b> — усім у боті\n• <b>nobuy</b> — ще без покупок (дотиск до першої)\n• <b>buyers</b> — з покупками\n• <b>vip</b> — рівень VIP+ (від 15 000)\n• <b>sleeping</b> — купували, але тиша 60+ днів\n• <b>pregnant/m0_3/m3_6/m6_12/lipoland</b> — за стадією\n• <b>mamulya/modnamama/znana</b> — за магазином\n\n<b>Кнопка</b> (необовʼязково): додайте в кінці <code>|| текст | посилання</code> або ярлик магазину <code>|| mamulya</code> (modnamama/znana/antiage).\n\nПриклади:\n<code>/post nobuy Знижка −7% чекає 💗 || mamulya</code>\n<code>/post buyers Нова колекція! || Подивитись | https://modnamama.ua/new</code>")
     if chat_id in ADMINS and t == "/postold":
         n_ = DB.execute("select count(*) from legacy").fetchone()[0]
         lvl = near = zero = 0
@@ -448,6 +448,17 @@ def on_text(chat_id, text):
         stage = parts[1] if len(parts) > 2 and parts[1] in LIFECYCLE else None
         store = STORE_ARG.get(seg) if len(parts) > 2 else None
         body = parts[2] if seg else t[5:].strip()
+        SHOP_BTN = {"mamulya": ("🛍 На Mamulya.lviv", "https://mamulya.lviv.ua"),
+                    "modnamama": ("🛍 На Modnamama", "https://modnamama.ua"),
+                    "znana": ("🛍 На Znana Mama", "https://znanamama.com.ua"),
+                    "antiage": ("🛍 На AntiAge", "https://antiagecosmetics.com.ua")}
+        post_btn = None
+        if "||" in body:
+            body, _, btn_raw = body.partition("||")
+            body = body.strip(); btn_raw = btn_raw.strip()
+            if btn_raw.lower() in SHOP_BTN: post_btn = SHOP_BTN[btn_raw.lower()]
+            elif "|" in btn_raw:
+                lbl, _, url = btn_raw.partition("|"); post_btn = (lbl.strip(), url.strip())
         phones_sql = None  # сегменти за покупками рахуються по телефону
         if seg == "nobuy":
             phones_sql = f"c.phone='' or not exists(select 1 from orders o where o.phone=c.phone and {SOLD_F})"
@@ -464,14 +475,15 @@ def on_text(chat_id, text):
         else: ids = [r[0] for r in DB.execute("select chat_id from customers")]
         cur = DB.execute("insert into posts(ts,target,text) values(?,?,?)", (time.time(), seg or "всі", body))
         pid = cur.lastrowid; DB.commit()
+        kb = [[post_btn]] if post_btn else None
         ok = 0
         for cid in ids:
             try:
-                send(cid, body); ok += 1
+                send(cid, body, kb); ok += 1
                 DB.execute("insert or ignore into sent values(?,?,?)", (cid, f"post:{pid}", time.time()))
             except Exception as e: print("post", e)
         DB.commit()
-        return send(chat_id, f"Надіслано {ok}/{len(ids)}")
+        return send(chat_id, f"Надіслано {ok}/{len(ids)}" + (" (з кнопкою)" if post_btn else ""))
     if t.lower().strip("!. ") in ("подарунок", "це подарунок", "на подарунок", "купувала на подарунок"):
         DB.execute("update customers set stage='unknown', dob='' where chat_id=?", (chat_id,)); DB.commit()
         return send(chat_id, "Зрозуміла 🎁 Вікових порад не надсилатиму — лише найкорисніше зрідка. Подарунки і купони працюють як завжди!")
