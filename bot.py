@@ -173,7 +173,14 @@ def save_order(o, names=None):
     names = names or {}
     items = [p.get("name") or names.get(p.get("productId"), "") for p in o.get("products", [])]
     store = STORES.get(int(o.get("sajt") or 0), MARKETPLACE_FALLBACK if o.get("sajt") else "")
-    DB.execute("insert or replace into orders values(?,?,?,?,?,?,?,?)", (str(o.get("id")), phone, json.dumps(items, ensure_ascii=False), time.time(), float(o.get("paymentAmount") or 0), store, int(o.get("statusId") or 0), coupon_in(o) or "")); DB.commit()
+    # ponytail: справжня дата замовлення з SalesDrive (orderTime), а не момент синку
+    ots = time.time()
+    raw = str(o.get("orderTime") or o.get("timeEntryOrder") or "")[:19]
+    if raw:
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+            try: ots = time.mktime(time.strptime(raw, fmt)); break
+            except Exception: pass
+    DB.execute("insert or replace into orders values(?,?,?,?,?,?,?,?)", (str(o.get("id")), phone, json.dumps(items, ensure_ascii=False), ots, float(o.get("paymentAmount") or 0), store, int(o.get("statusId") or 0), coupon_in(o) or "")); DB.commit()
     return phone, items
 
 # ---------- gifts ----------
