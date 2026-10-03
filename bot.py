@@ -26,6 +26,7 @@ create table if not exists pool(code text primary key, chat_id int, ts real);
 create table if not exists names(phone text primary key, name text);
 create table if not exists b2b(phone text primary key);
 create table if not exists scheduled(id integer primary key autoincrement, run_ts real, seg text, body text, btn text, done int default 0, sent int default 0, total int default 0, img text default '');
+create table if not exists sched_excl(sid int, chat_id int, primary key(sid, chat_id));
 """)
 try: DB.execute("alter table orders add column amount real default 0")
 except Exception: pass
@@ -476,8 +477,8 @@ def personalize(body, cid):
     for k, v in repl.items(): body = body.replace(k, v)
     return body
 
-def run_broadcast(seg, body, btn, img=None):
-    ids = resolve_ids(seg)
+def run_broadcast(seg, body, btn, img=None, exclude=None):
+    ids = [c for c in resolve_ids(seg) if not exclude or c not in exclude]
     cur = DB.execute("insert into posts(ts,target,text) values(?,?,?)", (time.time(), seg or "всі", body))
     pid = cur.lastrowid; DB.commit()
     kb = [[btn]] if btn else None
@@ -824,8 +825,9 @@ def cron():
         DB.commit()
         for sid, seg, body, btn_s, img in DB.execute("select id,seg,body,btn,coalesce(img,'') from scheduled where done=0 and run_ts<=?", (now,)).fetchall():
             btn = tuple(btn_s.split("|", 1)) if btn_s else None
+            excl = {r[0] for r in DB.execute("select chat_id from sched_excl where sid=?", (sid,))}
             try:
-                ok, total = run_broadcast(seg or None, body, btn, img or None)
+                ok, total = run_broadcast(seg or None, body, btn, img or None, excl)
                 DB.execute("update scheduled set done=1, sent=?, total=? where id=?", (ok, total, sid))
                 for a in ADMINS:
                     try: send(a, f"📬 Заплановану розсилку надіслано: {ok}/{total} ({seg or 'всі'})")
@@ -1020,6 +1022,18 @@ class Hook(BaseHTTPRequestHandler):
         if u.path == "/posts" and authed:
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
             self.wfile.write(posts_page().encode()); return
+        if u.path == "/sched" and authed:
+            sid = int(qs.get("id", ["0"])[0])
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
+            self.wfile.write(sched_page(sid).encode()); return
+        if u.path == "/schedx" and authed:
+            sid = int(qs.get("id", ["0"])[0]); cid = int(qs.get("cid", ["0"])[0])
+            if DB.execute("select 1 from sched_excl where sid=? and chat_id=?", (sid, cid)).fetchone():
+                DB.execute("delete from sched_excl where sid=? and chat_id=?", (sid, cid))
+            else:
+                DB.execute("insert or ignore into sched_excl values(?,?)", (sid, cid))
+            DB.commit()
+            self.send_response(302); self.send_header("Location", f"/sched?key={os.environ.get('ADMIN_KEY','')}&id={sid}"); self.end_headers(); return
         if u.path == "/client" and authed:
             cid = int(qs.get("id", ["0"])[0])
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
@@ -1136,8 +1150,14 @@ def posts_page():
     sched_rows = ""
     for sid, rts, seg, body, btn, done, snt, tot in sched:
         when = time.strftime("%d.%m %H:%M", time.localtime(rts))
-        st = f"✅ надіслано {snt}/{tot}" if done else f"⏳ очікує · ~{len(resolve_ids((seg or '').lower()))} отримувачів"
-        sched_rows += f"<tr><td>#{sid}</td><td>{when}</td><td>{SEG_UA.get(seg, seg or 'усі')}</td><td>{st}</td><td style=max-width:280px;white-space:normal;color:#6E5F65>{(body or '')[:90]}" + ("  🔘" if btn else "") + "</td></tr>"
+        nex = n("select count(*) from sched_excl where sid=?", sid)
+        if done:
+            st = f"✅ надіслано {snt}/{tot}"; who = "—"
+        else:
+            eff = len([c for c in resolve_ids((seg or '').lower()) if not nex or not DB.execute('select 1 from sched_excl where sid=? and chat_id=?', (sid, c)).fetchone()])
+            st = f"⏳ очікує · <b>{eff}</b> отримувачів" + (f" <span style=color:#B8325A>(−{nex} вручну)</span>" if nex else "")
+            who = f"<a href='/sched?key={AK}&id={sid}'>👁 кому піде</a>"
+        sched_rows += f"<tr><td>#{sid}</td><td>{when}</td><td>{SEG_UA.get(seg, seg or 'усі')}</td><td>{st}</td><td>{who}</td><td style=max-width:260px;white-space:normal;color:#6E5F65>{(body or '')[:80]}" + ("  🔘" if btn else "") + "</td></tr>"
     cards = [("Розсилок", len(posts)), ("Доставлено", tot_deliv), ("Замовлень після (7д)", tot_ord), ("Оборот, грн", f"{tot_rev:,.0f}".replace(",", " "))]
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Розсилки — Mamulya Bot</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
@@ -1152,8 +1172,52 @@ def posts_page():
 <section class="p"><h2>Результат по магазинах <small>замовлення отримувачів розсилок, 7 днів</small></h2>
 <table><tr><th>Магазин</th><th>Замовлень</th><th>Оборот</th></tr>{store_rows}</table></section>
 <section class="p wide"><h2>Заплановані <small>бот надішле сам у вказаний час · керування: <code>/schedule</code> у боті</small></h2>
-<table><tr><th>ID</th><th>Коли</th><th>Сегмент</th><th>Статус</th><th>Текст</th></tr>{sched_rows or '<tr><td>нема запланованих — додайте <code>/schedule ДД.ММ ГГ:ХХ сегмент текст</code></td></tr>'}</table></section>
+<table><tr><th>ID</th><th>Коли</th><th>Сегмент</th><th>Статус</th><th>Отримувачі</th><th>Текст</th></tr>{sched_rows or '<tr><td>нема запланованих — додайте <code>/schedule ДД.ММ ГГ:ХХ сегмент текст</code></td></tr>'}</table></section>
 </div></html>"""
+
+def sched_page(sid):
+    AK = os.environ.get("ADMIN_KEY", "")
+    row = DB.execute("select run_ts, seg, body, done from scheduled where id=?", (sid,)).fetchone()
+    if not row: return "<p>Розсилку не знайдено</p>"
+    rts, seg, body, done = row
+    when = time.strftime("%d.%m о %H:%M", time.localtime(rts))
+    excl = {r[0] for r in DB.execute("select chat_id from sched_excl where sid=?", (sid,))}
+    ids = resolve_ids((seg or "").lower())
+    getname = lambda ph, cid: ((DB.execute("select name from names where phone=?", (ph,)).fetchone() or [None])[0]
+                               or (DB.execute("select name from legacy where chat_id=?", (cid,)).fetchone() or [None])[0] or "—")
+    rows = ""
+    for cid in ids:
+        c = DB.execute("select coalesce(phone,''), coalesce(stage,'') from customers where chat_id=?", (cid,)).fetchone()
+        ph, stage = (c or ("", ""))
+        total = DB.execute("select coalesce(sum(amount),0) from orders where phone=? and status not in (6,7,13,15,8)", (ph,)).fetchone()[0] if ph else 0
+        last = DB.execute("select items, ts from orders where phone=? and status not in (6,7,13,15,8) order by ts desc limit 1", (ph,)).fetchone() if ph else None
+        lasttxt = ""
+        if last:
+            try: its = ", ".join(json.loads(last[0])[:2])
+            except Exception: its = ""
+            lasttxt = f"{its[:48]} · {time.strftime('%d.%m.%y', time.localtime(last[1]))}"
+        off = cid in excl
+        act = (f"<a href='/schedx?key={AK}&id={sid}&cid={cid}&back=1' style='color:#2E8B57'>↩ повернути</a>" if off
+               else f"<a href='/schedx?key={AK}&id={sid}&cid={cid}' style='color:#B8325A'>✕ виключити</a>")
+        style = " style='opacity:.4;text-decoration:line-through'" if off else ""
+        rows += (f"<tr{style}><td>{getname(ph, cid)}</td><td class=n>{ph or '—'}</td><td class=n>{total:,.0f}</td>".replace(",", " ")
+                 + f"<td>{STAGE_UA.get(stage, stage or '—')}</td><td style=color:#6E5F65>{lasttxt}</td><td>{'' if done else act}</td></tr>")
+    eff = len([c for c in ids if c not in excl])
+    note = "" if done else f"<p class=lead>Надіслати отримають <b>{eff}</b> із {len(ids)} (виключено вручну: {len(excl)}). Виключення застосується автоматично, коли розсилка піде {when}.</p>"
+    doneb = "<p style='color:#2E8B57'>Розсилку вже надіслано — список лише для перегляду.</p>" if done else ""
+    return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Кому піде #{sid}</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
+{CAB_CSS}
+<div class=top><h1>👁 Кому піде розсилка #{sid}</h1><span class=upd>{when}</span></div>
+<p><a href="/posts?key={AK}">← до розсилок</a></p>
+<section class="p wide"><h2>{SEG_UA_G.get(seg, seg or 'усі')} <small>{when}</small></h2>
+{doneb}{note}
+<div style="background:#FBF7F5;border:1px dashed #E8DCD8;border-radius:8px;padding:8px 12px;margin:0 0 12px;color:#6E5F65;white-space:pre-wrap;font-size:13px">{(body or '')[:400]}</div>
+<table><tr><th>Імʼя</th><th>Телефон</th><th>Покупки</th><th>Стадія</th><th>Останнє замовлення</th><th></th></tr>{rows or '<tr><td>нема отримувачів</td></tr>'}</table></section>
+</div></html>"""
+
+SEG_UA_G = {"nobuy": "🆕 без покупок", "buyers": "💜 покупці", "vip": "⭐ VIP", "sleeping": "😴 сплячі", "near": "✨ за крок до рівня", "doman": "🧒 Домана/Ліполенд"}
 
 def near_page():
     AK = os.environ.get("ADMIN_KEY", "")
