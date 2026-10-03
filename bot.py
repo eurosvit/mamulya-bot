@@ -401,6 +401,8 @@ def on_text(chat_id, text):
             f"🎟 Активних купонів: {live}\n"
             f"🎟 Вільних кодів −150: {n('select count(*) from pool where chat_id is null')}\n"
             f"📦 Замовлень у базі: {n('select count(*) from orders')}")
+    if chat_id in ADMINS and t == "/post":
+        return send(chat_id, "Розсилка. Формат: <code>/post &lt;сегмент&gt; текст</code>\n\nСегменти:\n• <b>(без сегмента)</b> — усім у боті\n• <b>nobuy</b> — ще без покупок (дотиск до першої)\n• <b>buyers</b> — з покупками\n• <b>vip</b> — рівень VIP+ (від 15 000)\n• <b>sleeping</b> — купували, але тиша 60+ днів\n• <b>pregnant/m0_3/m3_6/m6_12/lipoland</b> — за стадією\n• <b>mamulya/modnamama/znana</b> — за магазином\n\nПриклад: <code>/post nobuy Ваша знижка −7% досі чекає 💗</code>")
     if chat_id in ADMINS and t == "/postold":
         n_ = DB.execute("select count(*) from legacy").fetchone()[0]
         lvl = near = zero = 0
@@ -441,13 +443,26 @@ def on_text(chat_id, text):
         # /post текст — усім; /post m3_6 текст — тільки стадії
         parts = t.split(" ", 2)
         STORE_ARG = {"mamulya": "Mamulya.lviv", "modnamama": "Modnamama", "znana": "Znana Mama"}
+        SOLD_F = "status not in (6,7,13,15,8)"
+        seg = parts[1].lower() if len(parts) > 2 else None
         stage = parts[1] if len(parts) > 2 and parts[1] in LIFECYCLE else None
-        store = STORE_ARG.get(parts[1].lower()) if len(parts) > 2 else None
-        body = parts[2] if (stage or store) else t[5:].strip()
-        if stage: ids = [r[0] for r in DB.execute("select chat_id from customers where stage=?", (stage,))]
+        store = STORE_ARG.get(seg) if len(parts) > 2 else None
+        body = parts[2] if seg else t[5:].strip()
+        phones_sql = None  # сегменти за покупками рахуються по телефону
+        if seg == "nobuy":
+            phones_sql = f"c.phone='' or not exists(select 1 from orders o where o.phone=c.phone and {SOLD_F})"
+        elif seg == "vip":
+            phones_sql = f"(select coalesce(sum(o.amount),0) from orders o where o.phone=c.phone and {SOLD_F}) >= 15000"
+        elif seg == "buyers":
+            phones_sql = f"exists(select 1 from orders o where o.phone=c.phone and {SOLD_F})"
+        elif seg == "sleeping":
+            phones_sql = f"exists(select 1 from orders o where o.phone=c.phone and {SOLD_F}) and not exists(select 1 from orders o where o.phone=c.phone and {SOLD_F} and o.ts > {int(time.time())-60*86400})"
+        if phones_sql:
+            ids = [r[0] for r in DB.execute(f"select chat_id from customers c where {phones_sql}")]
+        elif stage: ids = [r[0] for r in DB.execute("select chat_id from customers where stage=?", (stage,))]
         elif store: ids = [r[0] for r in DB.execute("select chat_id from customers where store=?", (store,))]
         else: ids = [r[0] for r in DB.execute("select chat_id from customers")]
-        cur = DB.execute("insert into posts(ts,target,text) values(?,?,?)", (time.time(), stage or store or "всі", body))
+        cur = DB.execute("insert into posts(ts,target,text) values(?,?,?)", (time.time(), seg or "всі", body))
         pid = cur.lastrowid; DB.commit()
         ok = 0
         for cid in ids:
