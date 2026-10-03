@@ -930,6 +930,33 @@ class Hook(BaseHTTPRequestHandler):
             pages = int(qs.get("pages", ["1"])[0])
             threading.Thread(target=lambda: print("manual sync:", sync_orders(pages)), daemon=True).start()
             self.send_response(200); self.end_headers(); self.wfile.write(b"sync started"); return
+        if u.path == "/seedweek" and authed:
+            # ставить три заплановані розсилки тижня (ПН doman / ВТ nobuy / СР near); ідемпотентно
+            IMG = "https://mamulya.lviv.ua/uploads/shop/products/large/20e9abf2c47140a5ce2b2a3fd7163f01.png"
+            PROD = "Подивитись картки|https://mamulya.lviv.ua/kartki-domana-lipoland-a6"
+            MAM = "🛍 На Mamulya.lviv|https://mamulya.lviv.ua"
+            doman = ("🧒 <b>Новинка від Ліполенд — картки Домана!</b>\n\n"
+                     "Картки для раннього розвитку малюка:\n• яскраві зображення й слова\n"
+                     "• тренують увагу, памʼять і мовлення\n• підходять з перших місяців\n\n"
+                     "📐 Формат А6 — компактні, зручно брати з собою.\n\nСаме для вашого віку 🤍")
+            nobuy = ("Знаєте, що нас найбільше тішить? 💗\nВже понад <b>8 000 мам</b> обрали нас для себе й свого малюка.\n\n"
+                     "🎁 А на першу покупку діє <b>−7%</b> — промокод <b>LOVE7</b>.\n\n"
+                     "Вагаєтесь із вибором? Напишіть — залюбки підкажемо 🤍")
+            near = ("{імя}, вам лишилось зовсім трохи 💗\n\n"
+                    "✨ Ще <b>{залишок} грн</b> покупок — і відкривається постійна знижка <b>{рівень}</b>.\n"
+                    "📌 Зараз разом у ваших покупках: <b>{сума} грн</b>.\n\n"
+                    "Знижка діє завжди й ніколи не згорає — застосовується автоматично, щойно ви залогінені на сайті 🤍\n\n"
+                    "💎 Перевірити рівень — кнопка «Мій рівень» тут у боті.")
+            yr = time.localtime().tm_year
+            plan = [("doman", 5, doman, PROD, IMG), ("nobuy", 6, nobuy, MAM, ""), ("near", 7, near, MAM, "")]
+            out = []
+            for seg, day, body, btn, img in plan:
+                rts = time.mktime((yr, 10, day, 11, 0, 0, 0, 0, -1))
+                DB.execute("delete from scheduled where done=0 and seg=?", (seg,))  # прибрати попередній чернетковий, щоб не дублити
+                DB.execute("insert into scheduled(run_ts,seg,body,btn,img) values(?,?,?,?,?)", (rts, seg, body, btn, img))
+                out.append(f"{seg} {time.strftime('%d.%m %H:%M', time.localtime(rts))}")
+            DB.commit()
+            self.send_response(200); self.end_headers(); self.wfile.write(("seeded: " + "; ".join(out)).encode()); return
         if u.path == "/preview" and authed:
             # тестова відправка трьох запланованих розсилок лише адмінам (сегменти не чіпаємо)
             IMG = "https://mamulya.lviv.ua/uploads/shop/products/large/20e9abf2c47140a5ce2b2a3fd7163f01.png"
