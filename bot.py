@@ -949,7 +949,7 @@ def admin_page():
             out += f"<tr><td>{label}</td><td class=n>{v}</td><td class=n>{v/tot*100:.0f}%</td><td class=b><i style=width:{int(v/mx*100)}%></i></td></tr>"
         return out
 
-    SRC_UA = {"sms": "SMS", "qr": "QR з пакування", "web": "сайт", "migrate": "міграція", "direct": "самі знайшли", "—": "—"}
+    SRC_UA = {"sms": "SMS", "qr": "QR з пакування", "web": "сайт", "migrate": "міграція", "direct": "самі знайшли", "promo": "попап −7%", "—": "—"}
     fun = f"""<tr><td>Замовлень з 10.09</td><td class=n>{orders_since}</td><td></td></tr>
 <tr><td><b>Перейшли в бот</b></td><td class=n><b>{entered}</b></td><td class=n><b>{conv}</b></td></tr>"""
     for st in sorted(set(bso) | set(bse), key=lambda x: -bso.get(x, 0)):
@@ -971,7 +971,7 @@ def admin_page():
     def _disc(total):
         cur = next(((t, p, n) for t, p, n in LVL if total >= t), None)
         return f"{cur[1]}% {cur[2]}" if cur else "—"
-    cust_rows = "".join(f"<tr><td><a href=/client?key={AK}&id={r[0]}>{r[2] if r[2]!='—' else r[0]}</a></td><td>{r[1]}</td><td>{r[8]}</td><td>{STAGE_UA.get(r[3], r[3])}</td><td>{r[4] or '—'}</td><td>{SRC_UA.get(r[7], r[7])}</td><td class=n>{r[5][5:16]}</td><td class=n>{r[6]}</td><td class=n>{r[9]:,.0f}".replace(",", " ") + f"</td><td class=n>{_disc(r[9])}</td></tr>" for r in cust)
+    cust_rows = "".join(f"<tr><td>{'🆕 ' if r[9]==0 else '💜 '}<a href=/client?key={AK}&id={r[0]}>{r[2] if r[2]!='—' else r[0]}</a></td><td>{r[1]}</td><td>{r[8]}</td><td>{STAGE_UA.get(r[3], r[3])}</td><td>{r[4] or '—'}</td><td>{SRC_UA.get(r[7], r[7])}</td><td class=n>{r[5][5:16]}</td><td class=n>{r[6]}</td><td class=n>{r[9]:,.0f}".replace(",", " ") + f"</td><td class=n>{_disc(r[9])}</td></tr>" for r in cust)
 
     cfg_stage = "".join(f"<tr><td>{STAGE_UA.get(st, st)}</td><td>{', '.join(kws)}</td></tr>" for st, kws in STAGE_RULES)
     cfg_gifts = "".join(f"<tr><td>{STAGE_UA.get(st, st)}</td><td>{' → '.join(g['label'] for g in gs)}</td></tr>" for st, gs in GIFTS.items())
