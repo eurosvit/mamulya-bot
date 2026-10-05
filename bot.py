@@ -887,8 +887,9 @@ def cron():
 # ---------- order-confirm landing (NOREPLY nudge) ----------
 import base64, hashlib
 ST_NOREPLY, ST_CONFIRMED, ST_CANCELLED = 10, 2, 13
-PM_DEPOSIT200 = 163            # «Накладний платіж (передоплата 200 грн)»
 DEPOSIT = 200
+# усі варіанти наложки/післяплати (різні назви одного) — потребують завдатку 200 грн
+COD_KEYWORDS = ("наклад", "наложен", "післяплат", "при отриман", "при доставц")
 PHONE_HREF, PHONE_TXT = "+380636324010", "+380 63 632 40 10"
 # видимі клієнту причини -> rejectionReasonId у SalesDrive (0 = без причини)
 DECLINE_REASONS = [("Вже придбав(ла) в іншому місці", 104),
@@ -921,6 +922,10 @@ def sd_order(order_id):
         o["_rows"].append((nm, unit, qty))
     m = re.search(r"Certificate:\s*([A-Za-z0-9_-]+)\s*\(([\d.]+)\)", o.get("comment") or "")
     o["_coupon"] = (m.group(1), float(m.group(2))) if m else None
+    pm_opts = {x.get("value"): (x.get("text") or "") for x in
+               ((((resp.get("meta") or {}).get("fields") or {}).get("payment_method") or {}).get("options") or [])}
+    pm_text = (pm_opts.get(o.get("payment_method")) or "").lower()
+    o["_cod"] = any(k in pm_text for k in COD_KEYWORDS)
     return o
 
 def liqpay_sign(data):
@@ -966,7 +971,7 @@ def page_shell(inner):
 
 def confirm_page(o):
     oid = o.get("id")
-    is_dep = int(o.get("payment_method") or 0) == PM_DEPOSIT200
+    is_dep = bool(o.get("_cod"))
     rws = (o.get("_rows") or [])[:8]
     rows = "".join('<div class=r><span><b>%d.</b> %s%s</span>%s</div>' % (
         i, esc(nm), (" ×%g" % q if q != 1 else ""),
@@ -1021,7 +1026,7 @@ def handle_confirm(oid, do, reason):
         return done_page("confirmed"), None
     if st in (ST_CANCELLED, 6, 7, 8, 15):
         return info_page("Це замовлення вже закрите. Якщо це помилка — зателефонуйте нам."), None
-    is_dep = int(o.get("payment_method") or 0) == PM_DEPOSIT200
+    is_dep = bool(o.get("_cod"))
     if do == "confirm" and not is_dep:
         sd_update(oid, {"statusId": ST_CONFIRMED}); return done_page("confirmed"), None
     if do == "decline":
@@ -1049,7 +1054,7 @@ def confirm_in_bot(chat_id, oid):
     if st in (ST_CANCELLED, 6, 7, 8, 15): return send(chat_id, "Це замовлення вже закрите.")
     items = ", ".join(r[0] for r in (o.get("_rows") or [])) or "замовлення"
     txt = f"Ваше замовлення №{oid}\n{items}\nРазом: {fmt_uah(o.get('paymentAmount'))}\n\nПідтверджуєте?"
-    if int(o.get("payment_method") or 0) == PM_DEPOSIT200:
+    if o.get("_cod"):
         return send(chat_id, txt + "\n\nЗавдаток 200 грн підтверджує замовлення й входить у вартість.",
             [[("✅ Оплатити завдаток 200 грн", f"{BASE_URL}/confirm?order={oid}&do=pay")], [("Замовлення не актуальне", f"cfmno:{oid}")]])
     return send(chat_id, txt, [[("✅ Так, підтверджую", f"cfmok:{oid}")], [("Замовлення не актуальне", f"cfmno:{oid}")]])
