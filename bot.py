@@ -138,7 +138,7 @@ def fetch_order(order_id):
     # ponytail: fallback — тягнемо з SalesDrive API, якщо вебхук не встиг
     if os.environ.get("SALESDRIVE_KEY"):
         try:
-            req = urllib.request.Request(f"https://aleyana.salesdrive.me/api/order/list/?filter[id]={order_id}",
+            req = urllib.request.Request(f"https://aleyana.salesdrive.me/api/order/list/?filter[id][from]={order_id}&filter[id][to]={order_id}",
                                          headers={"Form-Api-Key": os.environ["SALESDRIVE_KEY"]})
             resp = json.load(urllib.request.urlopen(req, timeout=20))
             ph, it = save_order(resp["data"][0], product_names(resp))
@@ -904,10 +904,16 @@ def sd_update(order_id, data):
     return json.load(urllib.request.urlopen(req, timeout=20))
 
 def sd_order(order_id):
-    req = urllib.request.Request("https://aleyana.salesdrive.me/api/order/list/?filter[id]=" + urllib.parse.quote(str(order_id)),
-        headers={"Form-Api-Key": os.environ.get("SALESDRIVE_KEY", "")})
-    rows = json.load(urllib.request.urlopen(req, timeout=20)).get("data") or []
-    return rows[0] if rows else None
+    # SalesDrive фільтрує id лише діапазоном from/to — для точного збігу задаємо однакові межі
+    url = "https://aleyana.salesdrive.me/api/order/list/?filter[id][from]=%s&filter[id][to]=%s" % (order_id, order_id)
+    resp = json.load(urllib.request.urlopen(
+        urllib.request.Request(url, headers={"Form-Api-Key": os.environ.get("SALESDRIVE_KEY", "")}), timeout=20))
+    rows = resp.get("data") or []
+    if not rows: return None
+    o = rows[0]
+    names = product_names(resp)
+    o["_items"] = [p.get("name") or names.get(p.get("productId"), "") for p in o.get("products", [])]
+    return o
 
 def liqpay_sign(data):
     p = os.environ.get("LIQPAY_PRIVATE_KEY", "")
@@ -951,7 +957,7 @@ def page_shell(inner):
 def confirm_page(o):
     oid = o.get("id")
     is_dep = int(o.get("payment_method") or 0) == PM_DEPOSIT200
-    items = [esc(p.get("name") or "товар") for p in (o.get("products") or [])][:6]
+    items = [esc(i) for i in (o.get("_items") or []) if i][:6]
     rows = "".join('<div class=r><span>%s</span></div>' % i for i in items) or '<div class=r><span>Замовлення</span></div>'
     dest = esc(o.get("shipping_address") or o.get("adresaDostavki") or "")
     deliv = ('<div class="muted" style="margin-top:8px">🚚 %s</div>' % dest) if dest else ""
@@ -962,7 +968,7 @@ def confirm_page(o):
     reasons = "".join('<a class=bs href="/confirm?order=%s&do=decline&r=%d">%s</a>' % (oid, rid, esc(txt))
                       for txt, rid in DECLINE_REASONS)
     inner = (
-        '<div class=hd>🛍 Mamulya.lviv</div><div class=bd>'
+        '<div class=hd><img src="https://mamulya.lviv.ua/uploads/images/logo-mamulya.png" alt="Mamulya.lviv" style="height:30px"></div><div class=bd>'
         '<div class=muted>Замовлення</div><div style="font-size:20px;font-weight:600;margin:2px 0 4px">№ %s</div>'
         '<div class=ord>%s<div class=tot><span>Разом</span><span>%s</span></div>%s</div>'
         '%s<p class=q>Підтверджуєте замовлення?</p>'
@@ -1026,7 +1032,7 @@ def confirm_in_bot(chat_id, oid):
     st = int(o.get("statusId") or 0)
     if st in (ST_CONFIRMED, 3, 4, 5, 11, 16): return send(chat_id, "Це замовлення вже підтверджене ✅")
     if st in (ST_CANCELLED, 6, 7, 8, 15): return send(chat_id, "Це замовлення вже закрите.")
-    items = ", ".join((p.get("name") or "") for p in (o.get("products") or [])[:3]) or "замовлення"
+    items = ", ".join(i for i in (o.get("_items") or []) if i) or "замовлення"
     txt = f"Ваше замовлення №{oid}\n{items}\nРазом: {fmt_uah(o.get('paymentAmount'))}\n\nПідтверджуєте?"
     if int(o.get("payment_method") or 0) == PM_DEPOSIT200:
         return send(chat_id, txt + "\n\nЗавдаток 200 грн підтверджує замовлення й входить у вартість.",
