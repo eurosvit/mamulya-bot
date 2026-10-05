@@ -932,12 +932,13 @@ def liqpay_sign(data):
     p = os.environ.get("LIQPAY_PRIVATE_KEY", "")
     return base64.b64encode(hashlib.sha1((p + data + p).encode()).digest()).decode()
 
-def liqpay_checkout(order_id, amount, desc):
+def liqpay_checkout(order_id, amount, desc, sandbox=False):
     # per-order лінк: order_id = № заявки -> платіж матчиться в SalesDrive
     params = {"public_key": os.environ.get("LIQPAY_PUBLIC_KEY", ""), "version": "3",
         "action": "pay", "amount": amount, "currency": "UAH", "description": desc,
         "order_id": str(order_id), "result_url": f"{BASE_URL}/confirm?order={order_id}",
         "server_url": f"{BASE_URL}/liqpay"}
+    if sandbox: params["sandbox"] = "1"   # тест без реальних грошей (картка 4242…)
     data = base64.b64encode(json.dumps(params).encode()).decode()
     return data, liqpay_sign(data)
 
@@ -1026,7 +1027,7 @@ def done_page(kind):
 def info_page(text):
     return page_shell('<div class="ok gray"><div class=ic>•</div><p class=muted style="line-height:1.6">%s</p></div>' % esc(text))
 
-def handle_confirm(oid, do, reason):
+def handle_confirm(oid, do, reason, test=False):
     """Повертає (html_bytes, extra) для /confirm. extra={'liqpay':(data,sign)} якщо треба оплата."""
     try: o = sd_order(oid)
     except Exception as e:
@@ -1045,7 +1046,7 @@ def handle_confirm(oid, do, reason):
         if reason in REASON_OK: data["rejectionReasonId"] = int(reason)
         sd_update(oid, data); return done_page("declined"), None
     if do == "pay" and is_dep:
-        d, s = liqpay_checkout(oid, DEPOSIT, "Завдаток за замовлення №%s, Mamulya.lviv" % oid)
+        d, s = liqpay_checkout(oid, DEPOSIT, "Завдаток за замовлення №%s, Mamulya.lviv" % oid, sandbox=test)
         return None, (d, s)
     return confirm_page(o), None
 
@@ -1168,8 +1169,9 @@ class Hook(BaseHTTPRequestHandler):
             self.send_response(302); self.send_header("Location", target); self.end_headers(); return
         if u.path == "/confirm":  # публічний: сторінка підтвердження замовлення (NOREPLY-нудж)
             oid = qs.get("order", [""])[0]; do = qs.get("do", [""])[0]; reason = qs.get("r", [""])[0]
+            test = qs.get("test", [""])[0] == "1"
             if oid.isdigit():
-                html, extra = handle_confirm(oid, do, reason)
+                html, extra = handle_confirm(oid, do, reason, test)
                 body = liqpay_submit(*extra) if extra else html
             else:
                 body = info_page("Некоректне посилання.")
