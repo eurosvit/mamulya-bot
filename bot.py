@@ -833,14 +833,25 @@ def cron():
                     DB.execute("insert into sent values(?,?,?)", (chat_id, key, now))
         for code, chat_id, exp in DB.execute("select code,chat_id,expires from coupons where reminded=0 and expires-? < ?", (now, 5 * DAY)):
             try:
-                # кнопка + текст під магазин коду
-                if code.startswith("ZNBOT"):
+                # значення купона + магазин за префіксом коду
+                cu = code.upper()
+                if cu.startswith("ZNBOT"):
+                    val = "−10% на одяг Znana Mama"
+                    what = "Топи, сорочки, халати, білизна власного бренду Znana Mama"
                     btn = ("На Znana Mama", add_utm(f"https://znanamama.com.ua/?promo={code}", "coupon"))
-                    what = "Зручний одяг для вагітних і годуючих від нашого бренду Znana Mama"
-                else:
-                    btn = ("На Modnamama", add_utm(f"https://modnamama.ua/?c={code}", "coupon"))
+                elif cu.startswith("FREESHIP"):
+                    val = "безкоштовну доставку"
+                    what = "Усе для вагітності й малюка на Mamulya.lviv"
+                    btn = ("На Mamulya.lviv", add_utm("https://mamulya.lviv.ua", "coupon"))
+                elif cu.startswith("ANTIAGE"):
+                    val = "−10% на догляд"
+                    what = "Доглядова косметика AntiAge Cosmetics"
+                    btn = ("На AntiAge", add_utm("https://antiagecosmetics.com.ua", "coupon"))
+                else:  # MAM…/MMBOT… — купон Modnamama
+                    val = "−300 грн на замовлення від 2 000 грн"
                     what = "Все для малюка в Modnamama — коляски, купання, іграшки, одяг"
-                send(chat_id, T["coupon_left"].format(code=code, what=what), [[btn]])
+                    btn = ("На Modnamama", add_utm(f"https://modnamama.ua/?c={code}", "coupon"))
+                send(chat_id, T["coupon_left"].format(code=code, val=val, what=what), [[btn]])
                 DB.execute("insert or ignore into sent values(?,?,?)", (chat_id, f"coupexp:{code}", now))
             except Exception as e: print("remind", e)
             DB.execute("update coupons set reminded=1 where code=?", (code,))
