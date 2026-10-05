@@ -27,6 +27,7 @@ create table if not exists names(phone text primary key, name text);
 create table if not exists b2b(phone text primary key);
 create table if not exists scheduled(id integer primary key autoincrement, run_ts real, seg text, body text, btn text, done int default 0, sent int default 0, total int default 0, img text default '');
 create table if not exists sched_excl(sid int, chat_id int, primary key(sid, chat_id));
+create table if not exists clicks(pid int, chat_id int, ts real);
 """)
 try: DB.execute("alter table orders add column amount real default 0")
 except Exception: pass
@@ -221,7 +222,7 @@ def give(chat_id, gift):
             code = r["code"]; exp = time.time() + 30 * DAY
             DB.execute("insert into coupons values(?,?,?,0)", (code, chat_id, exp)); DB.commit()
             send(chat_id, T["gift_znana"].format(code=code, date=time.strftime("%d.%m", time.localtime(exp))),
-                 [[("На Znana Mama", "https://znanamama.com.ua/khity")]])
+                 [[("На Znana Mama", add_utm("https://znanamama.com.ua/khity", "gift"))]])
         except Exception as e:
             print("znana", e)
             DB.execute("delete from gifts where chat_id=? and gift=?", (chat_id, gift)); DB.commit()
@@ -408,6 +409,22 @@ SHOP_BTN = {"mamulya": ("🛍 На Mamulya.lviv", "https://mamulya.lviv.ua"),
             "antiage": ("🛍 На AntiAge", "https://antiagecosmetics.com.ua")}
 STORE_ARG = {"mamulya": "Mamulya.lviv", "modnamama": "Modnamama", "znana": "Znana Mama"}
 SOLD_F = "status not in (6,7,13,15,8)"
+ALLOWED_HOSTS = ("mamulya.lviv.ua", "modnamama.ua", "znanamama.com.ua", "antiagecosmetics.com.ua", "lipoland.fun")
+BASE_URL = os.environ.get("BASE_URL", "https://mamulya-bot.onrender.com").rstrip("/")
+
+def add_utm(url, seg):
+    # обовʼязкові UTM, щоб SalesDrive бачила замовлення як кампанію «Telegram Bot»
+    if not url.startswith("http"): return url
+    host = urllib.parse.urlparse(url).hostname or ""
+    if host not in ALLOWED_HOSTS: return url  # зовнішні лінки не чіпаємо
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}utm_source=telegram&utm_medium=bot&utm_campaign={seg or 'post'}"
+
+def track_url(url, pid, cid, seg):
+    # UTM + редирект через бота (для кліків/CTR у кабінеті)
+    url = add_utm(url, seg)
+    if not url.startswith("http") or not BASE_URL: return url
+    return f"{BASE_URL}/r?p={pid}&c={cid}&u={urllib.parse.quote(url, safe='')}"
 
 def parse_button(body):
     img = None
@@ -486,11 +503,11 @@ def run_broadcast(seg, body, btn, img=None, exclude=None):
     ids = [c for c in resolve_ids(seg) if not exclude or c not in exclude]
     cur = DB.execute("insert into posts(ts,target,text) values(?,?,?)", (time.time(), seg or "всі", body))
     pid = cur.lastrowid; DB.commit()
-    kb = [[btn]] if btn else None
     ok = 0
     for cid in ids:
         try:
             msg = personalize(body, cid)
+            kb = [[(btn[0], track_url(btn[1], pid, cid, seg))]] if btn else None
             send_photo_url(cid, img, msg, kb) if img else send(cid, msg, kb)
             ok += 1
             DB.execute("insert or ignore into sent values(?,?,?)", (cid, f"post:{pid}", time.time()))
@@ -798,7 +815,7 @@ def cron():
             for days, key, tkey in ((2, "promo_r1", "promo_r1"), (5, "promo_r2", "promo_r2")):
                 if now - (ts0 or 0) >= days * DAY and not DB.execute("select 1 from sent where chat_id=? and key=?", (chat_id, key)).fetchone():
                     try:
-                        send(chat_id, T[tkey], [[("На Mamulya.lviv", "https://mamulya.lviv.ua")]])
+                        send(chat_id, T[tkey], [[("На Mamulya.lviv", add_utm("https://mamulya.lviv.ua", "promo"))]])
                         DB.execute("insert into sent values(?,?,?)", (chat_id, key, now))
                     except Exception as e: print("promo_rem", e)
         DB.commit()
@@ -811,17 +828,17 @@ def cron():
             for days, key, text, url in LIFECYCLE.get(stage, []):
                 if key == "p3" and store == "Znana Mama": continue  # ponytail: не рекламуємо Znana її ж покупцям
                 if now - created >= days * DAY and not DB.execute("select 1 from sent where chat_id=? and key=?", (chat_id, key)).fetchone():
-                    try: send(chat_id, text, [[("Подивитись", url)]] if url else None)
+                    try: send(chat_id, text, [[("Подивитись", add_utm(url, "lifecycle"))]] if url else None)
                     except Exception as e: print("send", e)
                     DB.execute("insert into sent values(?,?,?)", (chat_id, key, now))
         for code, chat_id, exp in DB.execute("select code,chat_id,expires from coupons where reminded=0 and expires-? < ?", (now, 5 * DAY)):
             try:
                 # кнопка + текст під магазин коду
                 if code.startswith("ZNBOT"):
-                    btn = ("На Znana Mama", f"https://znanamama.com.ua/?promo={code}")
+                    btn = ("На Znana Mama", add_utm(f"https://znanamama.com.ua/?promo={code}", "coupon"))
                     what = "Зручний одяг для вагітних і годуючих від нашого бренду Znana Mama"
                 else:
-                    btn = ("На Modnamama", f"https://modnamama.ua/?c={code}")
+                    btn = ("На Modnamama", add_utm(f"https://modnamama.ua/?c={code}", "coupon"))
                     what = "Все для малюка в Modnamama — коляски, купання, іграшки, одяг"
                 send(chat_id, T["coupon_left"].format(code=code, what=what), [[btn]])
                 DB.execute("insert or ignore into sent values(?,?,?)", (chat_id, f"coupexp:{code}", now))
@@ -907,6 +924,14 @@ class Hook(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         qs = parse_qs(u.query)
         authed = qs.get("key", [""])[0] == os.environ.get("ADMIN_KEY", "")
+        if u.path == "/r":  # публічний: клієнт тисне кнопку розсилки → лог кліку → редирект
+            pid = int(qs.get("p", ["0"])[0] or 0); cid = int(qs.get("c", ["0"])[0] or 0)
+            dest = qs.get("u", [""])[0]
+            d = urlparse(dest)
+            target = dest if d.scheme in ("http", "https") and (d.hostname or "") in ALLOWED_HOSTS else "https://mamulya.lviv.ua"
+            try: DB.execute("insert into clicks values(?,?,?)", (pid, cid, time.time())); DB.commit()
+            except Exception as e: print("click", e)
+            self.send_response(302); self.send_header("Location", target); self.end_headers(); return
         if u.path == "/stats.json" and authed:
             LAUNCH = 1789045200
             def n(q, *a): return DB.execute(q, a).fetchone()[0]
@@ -1140,10 +1165,12 @@ def posts_page():
             and o.phone in (select c.phone from customers c join sent s on s.chat_id=c.chat_id where s.key=? and c.phone!='')""",
             ts, ts, f"post:{pid}")
         orders, rev = att[0] if att else (0, 0)
+        clk = n("select count(distinct chat_id) from clicks where pid=?", pid)
+        ctr = f"{clk/deliv*100:.0f}%" if deliv else "—"
         tot_deliv += deliv; tot_ord += orders; tot_rev += rev
         when = time.strftime("%d.%m %H:%M", time.localtime(ts))
         conv = f"{orders/deliv*100:.0f}%" if deliv else "—"
-        rows += f"<tr><td>{when}</td><td>{SEG_UA.get(target, target)}</td><td class=n>{deliv}</td><td class=n>{orders}</td><td class=n>{conv}</td><td class=n>{rev:,.0f}".replace(",", " ") + f"</td><td style=max-width:280px;white-space:normal;color:#6E5F65>{text[:90]}</td></tr>"
+        rows += f"<tr><td>{when}</td><td>{SEG_UA.get(target, target)}</td><td class=n>{deliv}</td><td class=n>{clk}</td><td class=n>{ctr}</td><td class=n>{orders}</td><td class=n>{conv}</td><td class=n>{rev:,.0f}".replace(",", " ") + f"</td><td style=max-width:240px;white-space:normal;color:#6E5F65>{text[:80]}</td></tr>"
     # розріз по магазинах: замовлення отримувачів усіх розсилок, 7 днів, по магазину
     by_store = q(f"""select o.store, count(*), coalesce(sum(o.amount),0) from orders o
         join sent s on s.key like 'post:%'
@@ -1173,7 +1200,7 @@ def posts_page():
 <div class=tiles>{"".join(f'<div class=tile><b>{v}</b><span>{k}</span></div>' for k, v in cards)}</div>
 <div class=grid>
 <section class="p wide"><h2>Надіслані розсилки <small>останні 50 · замовлення/оборот — отримувачі протягом 7 днів після</small></h2>
-<table><tr><th>Коли</th><th>Сегмент</th><th>Доставлено</th><th>Замовлень</th><th>Конв.</th><th>Оборот</th><th>Текст</th></tr>{rows or '<tr><td>ще не було розсилок — надішліть /post у боті</td></tr>'}</table></section>
+<table><tr><th>Коли</th><th>Сегмент</th><th>Доставлено</th><th>Кліки</th><th>CTR</th><th>Замовлень</th><th>Конв.</th><th>Оборот</th><th>Текст</th></tr>{rows or '<tr><td>ще не було розсилок — надішліть /post у боті</td></tr>'}</table></section>
 <section class="p"><h2>Результат по магазинах <small>замовлення отримувачів розсилок, 7 днів</small></h2>
 <table><tr><th>Магазин</th><th>Замовлень</th><th>Оборот</th></tr>{store_rows}</table></section>
 <section class="p wide"><h2>Заплановані <small>бот надішле сам у вказаний час · керування: <code>/schedule</code> у боті</small></h2>
