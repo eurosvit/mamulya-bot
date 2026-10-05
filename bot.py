@@ -914,10 +914,13 @@ def sd_order(order_id):
     names = product_names(resp)
     o["_rows"] = []
     for p in o.get("products", []):
-        nm = p.get("name") or names.get(p.get("productId"), "")
+        nm = p.get("text") or p.get("name") or names.get(p.get("productId"), "")
         if not nm: continue
         qty = float(p.get("amount") or 1)
-        o["_rows"].append((nm, float(p.get("costPerItem") or 0) * qty, qty))
+        unit = float(p.get("price") or p.get("costPerItem") or 0)
+        o["_rows"].append((nm, unit, qty))
+    m = re.search(r"Certificate:\s*([A-Za-z0-9_-]+)\s*\(([\d.]+)\)", o.get("comment") or "")
+    o["_coupon"] = (m.group(1), float(m.group(2))) if m else None
     return o
 
 def liqpay_sign(data):
@@ -942,7 +945,7 @@ PAGE_CSS = """<meta name=viewport content="width=device-width,initial-scale=1">
 .wrap{max-width:420px;margin:0 auto;padding:16px}.card{background:#fff;border-radius:16px;border:1px solid #eee;overflow:hidden}
 .hd{padding:22px 18px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;justify-content:center}.hd img{height:48px}
 .bd{padding:18px}.muted{color:#888;font-size:13px}.ord{background:#faf7f5;border-radius:12px;padding:12px 14px;margin:10px 0 16px}
-.ord .r{display:flex;justify-content:space-between;font-size:14px;padding:3px 0;color:#555}
+.ord .r{display:flex;justify-content:space-between;font-size:13px;padding:3px 0;color:#555}.ord .r b{color:#aaa;font-weight:600;margin-right:3px}.ord .pr{white-space:nowrap;padding-left:10px;color:#333}.ord .disc{color:#16a34a}
 .ord .tot{display:flex;justify-content:space-between;font-size:15px;font-weight:600;color:#1a1a1a;border-top:1px solid #eee;margin-top:6px;padding-top:8px}
 .q{font-size:17px;font-weight:600;margin:0 0 14px}
 .note{background:#faf7f5;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:13px;line-height:1.5;color:#555}
@@ -964,11 +967,13 @@ def page_shell(inner):
 def confirm_page(o):
     oid = o.get("id")
     is_dep = int(o.get("payment_method") or 0) == PM_DEPOSIT200
-    rws = (o.get("_rows") or [])[:6]
-    rows = "".join('<div class=r><span>%s%s</span>%s</div>' % (
-        esc(nm), (" ×%g" % q if q and q != 1 else ""),
-        ('<span style="white-space:nowrap;padding-left:10px">%s</span>' % fmt_uah(pr)) if pr > 0 else "")
-        for nm, pr, q in rws) or '<div class=r><span>Замовлення</span></div>'
+    rws = (o.get("_rows") or [])[:8]
+    rows = "".join('<div class=r><span><b>%d.</b> %s%s</span>%s</div>' % (
+        i, esc(nm), (" ×%g" % q if q != 1 else ""),
+        ('<span class=pr>%s</span>' % fmt_uah(unit * q)) if unit > 0 else "")
+        for i, (nm, unit, q) in enumerate(rws, 1)) or '<div class=r><span>Замовлення</span></div>'
+    cp = o.get("_coupon")
+    if cp: rows += '<div class="r disc"><span>Купон %s</span><span class=pr>−%s</span></div>' % (esc(cp[0]), fmt_uah(cp[1]))
     dest = esc(o.get("shipping_address") or o.get("adresaDostavki") or "")
     deliv = ('<div class="muted" style="margin-top:8px">🚚 %s</div>' % dest) if dest else ""
     note = ('<div class=note>Завдаток <b>200 грн</b> підтверджує замовлення й <b>входить у вартість</b> — '
