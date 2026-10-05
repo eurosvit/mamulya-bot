@@ -1034,8 +1034,10 @@ def handle_confirm(oid, do, reason, test=False, token=""):
     except Exception as e:
         print("sd_order", e); return info_page("Не вдалось відкрити замовлення. Спробуйте пізніше."), None
     if not o: return info_page("Замовлення не знайдено."), None
-    if (o.get("token") or "") != (token or ""):
-        return info_page("Посилання недійсне або застаріле. Якщо ви отримали SMS від Mamulya — зателефонуйте нам."), None
+    # ponytail: токен вимкнено на прохання — SalesDrive не дає його як SMS-змінну.
+    # Увімкнути назад: розкоментувати нижче + додати &t=<токен> у SMS-лінк.
+    # if (o.get("token") or "") != (token or ""):
+    #     return info_page("Посилання недійсне або застаріле. Зателефонуйте нам."), None
     st = int(o.get("statusId") or 0)
     if st in (ST_CONFIRMED, 3, 4, 5, 11, 16):  # вже підтверджено/в роботі/відправлено
         return done_page("confirmed"), None
