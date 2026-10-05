@@ -350,6 +350,8 @@ def on_start(chat_id, arg):
         return send(chat_id, T["ref_welcome"], [[("Mamulya", "https://mamulya.lviv.ua"), ("Modnamama −300 грн", "https://modnamama.ua/?c=FRIEND300")]])
     if arg == "znana-welcome":
         return znana_welcome(chat_id)
+    if arg[:1] == "c" and arg[1:].isdigit():   # підтвердження замовлення з NOREPLY-нуджа
+        return confirm_in_bot(chat_id, arg[1:])
     src = "sms" if arg.isdigit() else (arg or "direct")  # sms / qr / web / migrate / direct
     phone, items, store = fetch_order(arg) if arg.isdigit() else (None, [], "")
     if not phone:
@@ -685,6 +687,14 @@ def on_contact(chat_id, phone):
 def on_callback(cb):
     chat_id, data = cb["message"]["chat"]["id"], cb["data"]
     tg("answerCallbackQuery", callback_query_id=cb["id"])
+    if data.startswith("cfmok:"):
+        return cfm_do(chat_id, data[6:], None)
+    if data.startswith("cfmno:"):
+        oid = data[6:]
+        return send(chat_id, "Чому не актуально?", [[(txt, f"cfmr:{oid}:{rid}")] for txt, rid in DECLINE_REASONS])
+    if data.startswith("cfmr:"):
+        _, oid, rid = data.split(":")
+        return cfm_do(chat_id, oid, rid)
     if data.startswith("promo:"):
         kind = data[6:]
         stage = {"pregnant": "pregnant", "org": "b2b"}.get(kind, "unknown")
@@ -874,11 +884,187 @@ def cron():
         except Exception as e: print("reviews", e)
         time.sleep(3600)
 
+# ---------- order-confirm landing (NOREPLY nudge) ----------
+import base64, hashlib
+ST_NOREPLY, ST_CONFIRMED, ST_CANCELLED = 10, 2, 13
+PM_DEPOSIT200 = 163            # «Накладний платіж (передоплата 200 грн)»
+DEPOSIT = 200
+PHONE_HREF, PHONE_TXT = "+380636324010", "+380 63 632 40 10"
+# видимі клієнту причини -> rejectionReasonId у SalesDrive (0 = без причини)
+DECLINE_REASONS = [("Вже придбав(ла) в іншому місці", 104),
+                   ("Передумав(ла) робити замовлення", 108),
+                   ("Товар не підійшов", 107),
+                   ("Інша причина", 0)]
+REASON_OK = {str(i) for _, i in DECLINE_REASONS if i}
+
+def sd_update(order_id, data):
+    body = json.dumps({"id": int(order_id), "data": data}).encode()
+    req = urllib.request.Request("https://aleyana.salesdrive.me/api/order/update/", body,
+        {"Form-Api-Key": os.environ.get("SALESDRIVE_KEY", ""), "Content-Type": "application/json"})
+    return json.load(urllib.request.urlopen(req, timeout=20))
+
+def sd_order(order_id):
+    req = urllib.request.Request("https://aleyana.salesdrive.me/api/order/list/?filter[id]=" + urllib.parse.quote(str(order_id)),
+        headers={"Form-Api-Key": os.environ.get("SALESDRIVE_KEY", "")})
+    rows = json.load(urllib.request.urlopen(req, timeout=20)).get("data") or []
+    return rows[0] if rows else None
+
+def liqpay_sign(data):
+    p = os.environ.get("LIQPAY_PRIVATE_KEY", "")
+    return base64.b64encode(hashlib.sha1((p + data + p).encode()).digest()).decode()
+
+def liqpay_checkout(order_id, amount, desc):
+    # per-order лінк: order_id = № заявки -> платіж матчиться в SalesDrive
+    params = {"public_key": os.environ.get("LIQPAY_PUBLIC_KEY", ""), "version": "3",
+        "action": "pay", "amount": amount, "currency": "UAH", "description": desc,
+        "order_id": str(order_id), "result_url": f"{BASE_URL}/confirm?order={order_id}",
+        "server_url": f"{BASE_URL}/liqpay"}
+    data = base64.b64encode(json.dumps(params).encode()).decode()
+    return data, liqpay_sign(data)
+
+def esc(s): return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+def fmt_uah(n): return f"{float(n or 0):,.0f}".replace(",", " ") + " грн"
+
+PAGE_CSS = """<meta name=viewport content="width=device-width,initial-scale=1">
+<style>*{box-sizing:border-box}body{margin:0;background:#faf7f5;font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#1a1a1a}
+.wrap{max-width:420px;margin:0 auto;padding:16px}.card{background:#fff;border-radius:16px;border:1px solid #eee;overflow:hidden}
+.hd{padding:16px 18px;border-bottom:1px solid #f0f0f0;font-weight:600;display:flex;align-items:center;gap:8px}
+.bd{padding:18px}.muted{color:#888;font-size:13px}.ord{background:#faf7f5;border-radius:12px;padding:12px 14px;margin:10px 0 16px}
+.ord .r{display:flex;justify-content:space-between;font-size:14px;padding:3px 0;color:#555}
+.ord .tot{display:flex;justify-content:space-between;font-size:15px;font-weight:600;color:#1a1a1a;border-top:1px solid #eee;margin-top:6px;padding-top:8px}
+.q{font-size:17px;font-weight:600;margin:0 0 14px}
+.note{background:#faf7f5;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:13px;line-height:1.5;color:#555}
+.bp{display:block;width:100%;height:54px;border:0;border-radius:12px;background:#f07269;color:#fff;font-size:16px;font-weight:600;text-decoration:none;text-align:center;line-height:54px;margin-bottom:12px;cursor:pointer;animation:pulse 2.1s ease-in-out infinite}
+.bp:active{opacity:.9}@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.035)}}
+@media(prefers-reduced-motion:reduce){.bp{animation:none}}
+.bs{display:block;width:100%;height:44px;border:1px solid #e3e3e3;border-radius:10px;background:#fff;color:#333;font-size:14px;text-decoration:none;text-align:center;line-height:44px;margin-bottom:10px}
+.bg{display:block;width:100%;text-align:center;color:#aaa;font-size:14px;text-decoration:none;padding:8px}
+.ft{padding:12px 18px;border-top:1px solid #f0f0f0;font-size:13px;color:#888}.ft a{color:#f07269;text-decoration:none}
+.ok{text-align:center;padding:26px 18px}.ok .ic{width:60px;height:60px;border-radius:50%;background:#e8f6ef;color:#1d9e75;font-size:30px;line-height:60px;margin:0 auto 14px}
+.ok.gray .ic{background:#f0f0f0;color:#999}</style>"""
+
+def page_shell(inner):
+    return ("<!doctype html><html lang=uk><head><meta charset=utf-8><title>Mamulya.lviv</title>" + PAGE_CSS +
+            "</head><body><div class=wrap><div class=card>" + inner +
+            '<div class=ft>Питання? <a href="tel:' + PHONE_HREF + '">' + PHONE_TXT + "</a></div></div></div></body></html>").encode()
+
+def confirm_page(o):
+    oid = o.get("id")
+    is_dep = int(o.get("payment_method") or 0) == PM_DEPOSIT200
+    items = [esc(p.get("name") or "товар") for p in (o.get("products") or [])][:6]
+    rows = "".join('<div class=r><span>%s</span></div>' % i for i in items) or '<div class=r><span>Замовлення</span></div>'
+    dest = esc(o.get("shipping_address") or o.get("adresaDostavki") or "")
+    deliv = ('<div class="muted" style="margin-top:8px">🚚 %s</div>' % dest) if dest else ""
+    note = ('<div class=note>Завдаток <b>200 грн</b> підтверджує замовлення й <b>входить у вартість</b> — '
+            'решту сплачуєте при отриманні.</div>') if is_dep else ""
+    label = "Так, оплатити завдаток 200 грн" if is_dep else "Так, підтверджую"
+    act = "pay" if is_dep else "confirm"
+    reasons = "".join('<a class=bs href="/confirm?order=%s&do=decline&r=%d">%s</a>' % (oid, rid, esc(txt))
+                      for txt, rid in DECLINE_REASONS)
+    inner = (
+        '<div class=hd>🛍 Mamulya.lviv</div><div class=bd>'
+        '<div class=muted>Замовлення</div><div style="font-size:20px;font-weight:600;margin:2px 0 4px">№ %s</div>'
+        '<div class=ord>%s<div class=tot><span>Разом</span><span>%s</span></div>%s</div>'
+        '%s<p class=q>Підтверджуєте замовлення?</p>'
+        '<a class=bp href="/confirm?order=%s&do=%s">%s</a>'
+        '<a class=bs href="https://t.me/%s?start=c%s">Підтвердити в Telegram</a>'
+        '<details><summary class=bg>Замовлення не актуальне</summary><div style="margin-top:8px">%s</div></details>'
+        '</div>'
+    ) % (oid, rows, fmt_uah(o.get("paymentAmount")), deliv, note, oid, act, esc(label), BOT_NAME, oid, reasons)
+    return page_shell(inner)
+
+def done_page(kind):
+    if kind == "confirmed":
+        inner = ('<div class="ok"><div class=ic>✓</div><p style="font-size:18px;font-weight:600;margin:0 0 6px">Дякуємо, підтверджено</p>'
+                 '<p class=muted style="line-height:1.6">Готуємо замовлення до відправки. Надішлемо ТТН, щойно передамо на пошту.</p>'
+                 '<a class=bs style="display:inline-block;padding:0 18px;margin-top:8px" href="https://t.me/%s">Стежити в Telegram</a></div>' % BOT_NAME)
+    elif kind == "deposit_ok":
+        inner = ('<div class="ok"><div class=ic>✓</div><p style="font-size:18px;font-weight:600;margin:0 0 6px">Завдаток отримано</p>'
+                 '<p class=muted style="line-height:1.6">Замовлення підтверджено. Готуємо до відправки, решту сплатите при отриманні.</p></div>')
+    else:
+        inner = ('<div class="ok gray"><div class=ic>♡</div><p style="font-size:18px;font-weight:600;margin:0 0 6px">Дякуємо за відповідь</p>'
+                 '<p class=muted style="line-height:1.6">Будемо раді бачити вас згодом. Якщо передумаєте — замовлення легко поновити.</p></div>')
+    return page_shell(inner)
+
+def info_page(text):
+    return page_shell('<div class="ok gray"><div class=ic>•</div><p class=muted style="line-height:1.6">%s</p></div>' % esc(text))
+
+def handle_confirm(oid, do, reason):
+    """Повертає (html_bytes, extra) для /confirm. extra={'liqpay':(data,sign)} якщо треба оплата."""
+    try: o = sd_order(oid)
+    except Exception as e:
+        print("sd_order", e); return info_page("Не вдалось відкрити замовлення. Спробуйте пізніше."), None
+    if not o: return info_page("Замовлення не знайдено."), None
+    st = int(o.get("statusId") or 0)
+    if st in (ST_CONFIRMED, 3, 4, 5, 11, 16):  # вже підтверджено/в роботі/відправлено
+        return done_page("confirmed"), None
+    if st in (ST_CANCELLED, 6, 7, 8, 15):
+        return info_page("Це замовлення вже закрите. Якщо це помилка — зателефонуйте нам."), None
+    is_dep = int(o.get("payment_method") or 0) == PM_DEPOSIT200
+    if do == "confirm" and not is_dep:
+        sd_update(oid, {"statusId": ST_CONFIRMED}); return done_page("confirmed"), None
+    if do == "decline":
+        data = {"statusId": ST_CANCELLED}
+        if reason in REASON_OK: data["rejectionReasonId"] = int(reason)
+        sd_update(oid, data); return done_page("declined"), None
+    if do == "pay" and is_dep:
+        d, s = liqpay_checkout(oid, DEPOSIT, "Завдаток за замовлення №%s, Mamulya.lviv" % oid)
+        return None, (d, s)
+    return confirm_page(o), None
+
+def liqpay_submit(data, sign):
+    # авто-POST форма на LiqPay-checkout
+    return ("<!doctype html><meta charset=utf-8><body onload=document.f.submit()>"
+            '<form name=f method=POST action="https://www.liqpay.ua/api/3/checkout" accept-charset=utf-8>'
+            '<input type=hidden name=data value="%s"><input type=hidden name=signature value="%s">'
+            "</form>Переходимо до оплати…</body>" % (data, sign)).encode()
+
+def confirm_in_bot(chat_id, oid):
+    try: o = sd_order(oid)
+    except Exception as e: print("cfm order", e); o = None
+    if not o: return send(chat_id, "Не знайшли це замовлення 🙈 Напишіть менеджеру.")
+    st = int(o.get("statusId") or 0)
+    if st in (ST_CONFIRMED, 3, 4, 5, 11, 16): return send(chat_id, "Це замовлення вже підтверджене ✅")
+    if st in (ST_CANCELLED, 6, 7, 8, 15): return send(chat_id, "Це замовлення вже закрите.")
+    items = ", ".join((p.get("name") or "") for p in (o.get("products") or [])[:3]) or "замовлення"
+    txt = f"Ваше замовлення №{oid}\n{items}\nРазом: {fmt_uah(o.get('paymentAmount'))}\n\nПідтверджуєте?"
+    if int(o.get("payment_method") or 0) == PM_DEPOSIT200:
+        return send(chat_id, txt + "\n\nЗавдаток 200 грн підтверджує замовлення й входить у вартість.",
+            [[("✅ Оплатити завдаток 200 грн", f"{BASE_URL}/confirm?order={oid}&do=pay")], [("Замовлення не актуальне", f"cfmno:{oid}")]])
+    return send(chat_id, txt, [[("✅ Так, підтверджую", f"cfmok:{oid}")], [("Замовлення не актуальне", f"cfmno:{oid}")]])
+
+def cfm_do(chat_id, oid, reason):
+    try:
+        o = sd_order(oid)
+        if not o: return send(chat_id, "Не знайшли замовлення 🙈")
+        st = int(o.get("statusId") or 0)
+        if reason is None:
+            if st in (ST_CANCELLED, 6, 7, 8, 15): return send(chat_id, "Це замовлення вже закрите.")
+            sd_update(oid, {"statusId": ST_CONFIRMED})
+            return send(chat_id, f"Дякуємо! Замовлення №{oid} підтверджено ✅ Готуємо до відправки 💚")
+        data = {"statusId": ST_CANCELLED}
+        if reason in REASON_OK: data["rejectionReasonId"] = int(reason)
+        sd_update(oid, data)
+        return send(chat_id, "Дякуємо за відповідь 🤍 Якщо передумаєте — замовлення легко поновити.")
+    except Exception as e:
+        print("cfm_do", e); return send(chat_id, "Ой, не вдалось 🙈 Напишіть менеджеру, будь ласка.")
+
 # ---------- SalesDrive webhook ----------
 HTTPServer.allow_reuse_address = True
 
 class Hook(BaseHTTPRequestHandler):
     def do_POST(self):
+        from urllib.parse import urlparse, parse_qs
+        if urlparse(self.path).path == "/liqpay":  # LiqPay callback (підтверджена оплата завдатку)
+            raw = self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0).decode("utf-8", "ignore")
+            q = parse_qs(raw); data = q.get("data", [""])[0]; sign = q.get("signature", [""])[0]
+            try:
+                if data and sign == liqpay_sign(data):
+                    p = json.loads(base64.b64decode(data).decode("utf-8", "ignore"))
+                    if p.get("status") in ("success", "sandbox", "wait_accept") and float(p.get("amount") or 0) >= DEPOSIT:
+                        sd_update(p.get("order_id"), {"statusId": ST_CONFIRMED})
+            except Exception as e: print("liqpay", e)
+            self.send_response(200); self.end_headers(); return
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or b"{}"))
         o = body.get("data", body)
         if isinstance(o, list): o = o[0]
@@ -943,6 +1129,15 @@ class Hook(BaseHTTPRequestHandler):
             try: DB.execute("insert into clicks values(?,?,?)", (pid, cid, time.time())); DB.commit()
             except Exception as e: print("click", e)
             self.send_response(302); self.send_header("Location", target); self.end_headers(); return
+        if u.path == "/confirm":  # публічний: сторінка підтвердження замовлення (NOREPLY-нудж)
+            oid = qs.get("order", [""])[0]; do = qs.get("do", [""])[0]; reason = qs.get("r", [""])[0]
+            if oid.isdigit():
+                html, extra = handle_confirm(oid, do, reason)
+                body = liqpay_submit(*extra) if extra else html
+            else:
+                body = info_page("Некоректне посилання.")
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body); return
         if u.path == "/stats.json" and authed:
             LAUNCH = 1789045200
             def n(q, *a): return DB.execute(q, a).fetchone()[0]
