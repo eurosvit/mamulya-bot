@@ -912,7 +912,12 @@ def sd_order(order_id):
     if not rows: return None
     o = rows[0]
     names = product_names(resp)
-    o["_items"] = [p.get("name") or names.get(p.get("productId"), "") for p in o.get("products", [])]
+    o["_rows"] = []
+    for p in o.get("products", []):
+        nm = p.get("name") or names.get(p.get("productId"), "")
+        if not nm: continue
+        qty = float(p.get("amount") or 1)
+        o["_rows"].append((nm, float(p.get("costPerItem") or 0) * qty, qty))
     return o
 
 def liqpay_sign(data):
@@ -932,10 +937,10 @@ def esc(s): return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">"
 def fmt_uah(n): return f"{float(n or 0):,.0f}".replace(",", " ") + " грн"
 
 PAGE_CSS = """<meta name=viewport content="width=device-width,initial-scale=1">
-<link rel="icon" type="image/png" href="https://mamulya.lviv.ua/uploads/images/logo-mamulya.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23f07269'%3E%3Cpath d='M12 21s-8-5.3-8-11a4.5 4.5 0 0 1 8-2.8 4.5 4.5 0 0 1 8 2.8c0 5.7-8 11-8 11z'/%3E%3C/svg%3E">
 <style>*{box-sizing:border-box}body{margin:0;background:#faf7f5;font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#1a1a1a}
 .wrap{max-width:420px;margin:0 auto;padding:16px}.card{background:#fff;border-radius:16px;border:1px solid #eee;overflow:hidden}
-.hd{padding:16px 18px;border-bottom:1px solid #f0f0f0;font-weight:600;display:flex;align-items:center;gap:8px}
+.hd{padding:22px 18px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;justify-content:center}.hd img{height:48px}
 .bd{padding:18px}.muted{color:#888;font-size:13px}.ord{background:#faf7f5;border-radius:12px;padding:12px 14px;margin:10px 0 16px}
 .ord .r{display:flex;justify-content:space-between;font-size:14px;padding:3px 0;color:#555}
 .ord .tot{display:flex;justify-content:space-between;font-size:15px;font-weight:600;color:#1a1a1a;border-top:1px solid #eee;margin-top:6px;padding-top:8px}
@@ -958,8 +963,9 @@ def page_shell(inner):
 def confirm_page(o):
     oid = o.get("id")
     is_dep = int(o.get("payment_method") or 0) == PM_DEPOSIT200
-    items = [esc(i) for i in (o.get("_items") or []) if i][:6]
-    rows = "".join('<div class=r><span>%s</span></div>' % i for i in items) or '<div class=r><span>Замовлення</span></div>'
+    rws = (o.get("_rows") or [])[:6]
+    rows = "".join('<div class=r><span>%s%s</span><span style="white-space:nowrap;padding-left:10px">%s</span></div>' % (
+        esc(nm), (" ×%g" % q if q and q != 1 else ""), fmt_uah(pr)) for nm, pr, q in rws) or '<div class=r><span>Замовлення</span></div>'
     dest = esc(o.get("shipping_address") or o.get("adresaDostavki") or "")
     deliv = ('<div class="muted" style="margin-top:8px">🚚 %s</div>' % dest) if dest else ""
     note = ('<div class=note>Завдаток <b>200 грн</b> підтверджує замовлення й <b>входить у вартість</b> — '
@@ -969,7 +975,7 @@ def confirm_page(o):
     reasons = "".join('<a class=bs href="/confirm?order=%s&do=decline&r=%d">%s</a>' % (oid, rid, esc(txt))
                       for txt, rid in DECLINE_REASONS)
     inner = (
-        '<div class=hd><img src="https://mamulya.lviv.ua/uploads/images/logo-mamulya.png" alt="Mamulya.lviv" style="height:30px"></div><div class=bd>'
+        '<div class=hd><img src="https://mamulya.lviv.ua/uploads/images/logo-mamulya.png" alt="Mamulya.lviv"></div><div class=bd>'
         '<div class=muted>Замовлення</div><div style="font-size:20px;font-weight:600;margin:2px 0 4px">№ %s</div>'
         '<div class=ord>%s<div class=tot><span>Разом</span><span>%s</span></div>%s</div>'
         '%s<p class=q>Підтверджуєте замовлення?</p>'
@@ -1033,7 +1039,7 @@ def confirm_in_bot(chat_id, oid):
     st = int(o.get("statusId") or 0)
     if st in (ST_CONFIRMED, 3, 4, 5, 11, 16): return send(chat_id, "Це замовлення вже підтверджене ✅")
     if st in (ST_CANCELLED, 6, 7, 8, 15): return send(chat_id, "Це замовлення вже закрите.")
-    items = ", ".join(i for i in (o.get("_items") or []) if i) or "замовлення"
+    items = ", ".join(r[0] for r in (o.get("_rows") or [])) or "замовлення"
     txt = f"Ваше замовлення №{oid}\n{items}\nРазом: {fmt_uah(o.get('paymentAmount'))}\n\nПідтверджуєте?"
     if int(o.get("payment_method") or 0) == PM_DEPOSIT200:
         return send(chat_id, txt + "\n\nЗавдаток 200 грн підтверджує замовлення й входить у вартість.",
