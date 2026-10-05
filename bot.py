@@ -946,11 +946,12 @@ PAGE_CSS = """<meta name=viewport content="width=device-width,initial-scale=1">
 .ord .tot{display:flex;justify-content:space-between;font-size:15px;font-weight:600;color:#1a1a1a;border-top:1px solid #eee;margin-top:6px;padding-top:8px}
 .q{font-size:17px;font-weight:600;margin:0 0 14px}
 .note{background:#faf7f5;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:13px;line-height:1.5;color:#555}
-.bp{display:block;width:100%;height:54px;border:0;border-radius:12px;background:#f07269;color:#fff;font-size:16px;font-weight:600;text-decoration:none;text-align:center;line-height:54px;margin-bottom:12px;cursor:pointer;animation:pulse 2.1s ease-in-out infinite}
+.bp{display:block;width:100%;height:54px;border:0;border-radius:12px;background:#16a34a;color:#fff;font-size:16px;font-weight:600;text-decoration:none;text-align:center;line-height:54px;margin-bottom:12px;cursor:pointer;animation:pulse 2.1s ease-in-out infinite}
 .bp:active{opacity:.9}@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.035)}}
 @media(prefers-reduced-motion:reduce){.bp{animation:none}}
 .bs{display:block;width:100%;height:44px;border:1px solid #e3e3e3;border-radius:10px;background:#fff;color:#333;font-size:14px;text-decoration:none;text-align:center;line-height:44px;margin-bottom:10px}
-.bg{display:block;width:100%;text-align:center;color:#aaa;font-size:14px;text-decoration:none;padding:8px}
+.bg{display:block;width:100%;height:44px;line-height:44px;text-align:center;color:#999;font-size:14px;text-decoration:none;border:1px solid #eee;border-radius:10px;background:#fff;cursor:pointer;list-style:none}
+.bg::-webkit-details-marker{display:none}details[open] .bg{margin-bottom:10px}
 .ft{padding:12px 18px;border-top:1px solid #f0f0f0;font-size:13px;color:#888}.ft a{color:#f07269;text-decoration:none}
 .ok{text-align:center;padding:26px 18px}.ok .ic{width:60px;height:60px;border-radius:50%;background:#e8f6ef;color:#1d9e75;font-size:30px;line-height:60px;margin:0 auto 14px}
 .ok.gray .ic{background:#f0f0f0;color:#999}</style>"""
@@ -964,8 +965,10 @@ def confirm_page(o):
     oid = o.get("id")
     is_dep = int(o.get("payment_method") or 0) == PM_DEPOSIT200
     rws = (o.get("_rows") or [])[:6]
-    rows = "".join('<div class=r><span>%s%s</span><span style="white-space:nowrap;padding-left:10px">%s</span></div>' % (
-        esc(nm), (" ×%g" % q if q and q != 1 else ""), fmt_uah(pr)) for nm, pr, q in rws) or '<div class=r><span>Замовлення</span></div>'
+    rows = "".join('<div class=r><span>%s%s</span>%s</div>' % (
+        esc(nm), (" ×%g" % q if q and q != 1 else ""),
+        ('<span style="white-space:nowrap;padding-left:10px">%s</span>' % fmt_uah(pr)) if pr > 0 else "")
+        for nm, pr, q in rws) or '<div class=r><span>Замовлення</span></div>'
     dest = esc(o.get("shipping_address") or o.get("adresaDostavki") or "")
     deliv = ('<div class="muted" style="margin-top:8px">🚚 %s</div>' % dest) if dest else ""
     note = ('<div class=note>Завдаток <b>200 грн</b> підтверджує замовлення й <b>входить у вартість</b> — '
