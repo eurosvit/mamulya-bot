@@ -816,9 +816,9 @@ def sync_orders(pages, limit=50):
     return tot
 
 def auto_cancel_noreply():
-    # NOREPLY 7+ днів без реакції -> Скасований, причина «Немає відповіді» (102)
+    # NOREPLY 5+ днів без реакції (день після фінальної SMS) -> Скасований, причина «Немає відповіді» (102)
     now = time.time()
-    for (oid,) in DB.execute("select order_id from noreply where ?-ts >= ?", (now, 7 * DAY)).fetchall():
+    for (oid,) in DB.execute("select order_id from noreply where ?-ts >= ?", (now, 5 * DAY)).fetchall():
         try:
             o = sd_order(oid)
             if o and int(o.get("statusId") or 0) == 10:
