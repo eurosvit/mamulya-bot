@@ -936,7 +936,7 @@ def liqpay_checkout(order_id, amount, desc, sandbox=False):
     # per-order лінк: order_id = № заявки -> платіж матчиться в SalesDrive
     params = {"public_key": os.environ.get("LIQPAY_PUBLIC_KEY", ""), "version": "3",
         "action": "pay", "amount": amount, "currency": "UAH", "description": desc,
-        "order_id": str(order_id), "result_url": f"{BASE_URL}/confirm?order={order_id}",
+        "order_id": str(order_id), "result_url": f"{BASE_URL}/confirm?order={order_id}&paid=1",
         "server_url": f"{BASE_URL}/liqpay"}
     if sandbox: params["sandbox"] = "1"   # тест без реальних грошей (картка 4242…)
     data = base64.b64encode(json.dumps(params).encode()).decode()
@@ -975,6 +975,7 @@ def page_shell(inner):
 
 def confirm_page(o):
     oid = o.get("id")
+    tok = esc(o.get("token") or "")
     is_dep = bool(o.get("_cod"))
     rws = (o.get("_rows") or [])[:8]
     rows = "".join('<div class=r><span><b>%d.</b> %s%s</span>%s</div>' % (
@@ -989,14 +990,14 @@ def confirm_page(o):
             'решту сплачуєте при отриманні.</div>') if is_dep else ""
     label = "Так, оплатити завдаток 200 грн" if is_dep else "Так, підтверджую"
     act = "pay" if is_dep else "confirm"
-    reasons = "".join('<a class=bs href="/confirm?order=%s&do=decline&r=%d">%s</a>' % (oid, rid, esc(txt))
+    reasons = "".join('<a class=bs href="/confirm?order=%s&do=decline&r=%d&t=%s">%s</a>' % (oid, rid, tok, esc(txt))
                       for txt, rid in DECLINE_REASONS)
     inner = (
         '<div class=hd><img src="https://mamulya.lviv.ua/uploads/images/logo-mamulya.png" alt="Mamulya.lviv"></div><div class=bd>'
         '<div class=muted>Замовлення</div><div style="font-size:20px;font-weight:600;margin:2px 0 4px">№ %s</div>'
         '<div class=ord>%s<div class=tot><span>Разом</span><span>%s</span></div>%s</div>'
         '%s<p class=q>Підтверджуєте замовлення?</p>'
-        '<a class=bp href="/confirm?order=%s&do=%s">%s</a>'
+        '<a class=bp href="/confirm?order=%s&do=%s&t=%s">%s</a>'
         '<details><summary class=bg>Замовлення не актуальне</summary><div style="margin-top:8px">%s</div></details>'
         '<details class=help><summary>Потрібна допомога?</summary><div class=helpbody>'
         '<p><b>Не вдалось оплатити завдаток?</b><br>Спробуйте ще раз або зверніться до нас — допоможемо оформити.</p>'
@@ -1007,7 +1008,7 @@ def confirm_page(o):
         '<a href="https://t.me/+380636324010">Telegram</a></div>'
         '</div></details>'
         '</div>'
-    ) % (oid, rows, fmt_uah(o.get("paymentAmount")), deliv, note, oid, act, esc(label), reasons)
+    ) % (oid, rows, fmt_uah(o.get("paymentAmount")), deliv, note, oid, act, tok, esc(label), reasons)
     return page_shell(inner)
 
 def done_page(kind):
@@ -1027,12 +1028,14 @@ def done_page(kind):
 def info_page(text):
     return page_shell('<div class="ok gray"><div class=ic>•</div><p class=muted style="line-height:1.6">%s</p></div>' % esc(text))
 
-def handle_confirm(oid, do, reason, test=False):
+def handle_confirm(oid, do, reason, test=False, token=""):
     """Повертає (html_bytes, extra) для /confirm. extra={'liqpay':(data,sign)} якщо треба оплата."""
     try: o = sd_order(oid)
     except Exception as e:
         print("sd_order", e); return info_page("Не вдалось відкрити замовлення. Спробуйте пізніше."), None
     if not o: return info_page("Замовлення не знайдено."), None
+    if (o.get("token") or "") != (token or ""):
+        return info_page("Посилання недійсне або застаріле. Якщо ви отримали SMS від Mamulya — зателефонуйте нам."), None
     st = int(o.get("statusId") or 0)
     if st in (ST_CONFIRMED, 3, 4, 5, 11, 16):  # вже підтверджено/в роботі/відправлено
         return done_page("confirmed"), None
@@ -1068,7 +1071,7 @@ def confirm_in_bot(chat_id, oid):
     txt = f"Ваше замовлення №{oid}\n{items}\nРазом: {fmt_uah(o.get('paymentAmount'))}\n\nПідтверджуєте?"
     if o.get("_cod"):
         return send(chat_id, txt + "\n\nЗавдаток 200 грн підтверджує замовлення й входить у вартість.",
-            [[("✅ Оплатити завдаток 200 грн", f"{BASE_URL}/confirm?order={oid}&do=pay")], [("Замовлення не актуальне", f"cfmno:{oid}")]])
+            [[("✅ Оплатити завдаток 200 грн", f"{BASE_URL}/confirm?order={oid}&do=pay&t={o.get('token','')}")], [("Замовлення не актуальне", f"cfmno:{oid}")]])
     return send(chat_id, txt, [[("✅ Так, підтверджую", f"cfmok:{oid}")], [("Замовлення не актуальне", f"cfmno:{oid}")]])
 
 def cfm_do(chat_id, oid, reason):
@@ -1169,9 +1172,11 @@ class Hook(BaseHTTPRequestHandler):
             self.send_response(302); self.send_header("Location", target); self.end_headers(); return
         if u.path == "/confirm":  # публічний: сторінка підтвердження замовлення (NOREPLY-нудж)
             oid = qs.get("order", [""])[0]; do = qs.get("do", [""])[0]; reason = qs.get("r", [""])[0]
-            test = qs.get("test", [""])[0] == "1"
-            if oid.isdigit():
-                html, extra = handle_confirm(oid, do, reason, test)
+            test = qs.get("test", [""])[0] == "1"; token = qs.get("t", [""])[0]
+            if qs.get("paid", [""])[0] == "1":   # повернення з LiqPay — подяка без токена
+                body = done_page("deposit_ok")
+            elif oid.isdigit():
+                html, extra = handle_confirm(oid, do, reason, test, token)
                 body = liqpay_submit(*extra) if extra else html
             else:
                 body = info_page("Некоректне посилання.")
