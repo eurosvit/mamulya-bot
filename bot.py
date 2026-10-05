@@ -932,6 +932,7 @@ def esc(s): return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">"
 def fmt_uah(n): return f"{float(n or 0):,.0f}".replace(",", " ") + " грн"
 
 PAGE_CSS = """<meta name=viewport content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/png" href="https://mamulya.lviv.ua/uploads/images/logo-mamulya.png">
 <style>*{box-sizing:border-box}body{margin:0;background:#faf7f5;font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#1a1a1a}
 .wrap{max-width:420px;margin:0 auto;padding:16px}.card{background:#fff;border-radius:16px;border:1px solid #eee;overflow:hidden}
 .hd{padding:16px 18px;border-bottom:1px solid #f0f0f0;font-weight:600;display:flex;align-items:center;gap:8px}
