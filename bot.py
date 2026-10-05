@@ -997,7 +997,6 @@ def confirm_page(o):
         '<div class=ord>%s<div class=tot><span>Разом</span><span>%s</span></div>%s</div>'
         '%s<p class=q>Підтверджуєте замовлення?</p>'
         '<a class=bp href="/confirm?order=%s&do=%s">%s</a>'
-        '<a class=bs href="https://t.me/%s?start=c%s">Підтвердити в Telegram</a>'
         '<details><summary class=bg>Замовлення не актуальне</summary><div style="margin-top:8px">%s</div></details>'
         '<details class=help><summary>Потрібна допомога?</summary><div class=helpbody>'
         '<p><b>Не вдалось оплатити завдаток?</b><br>Спробуйте ще раз або зверніться до нас — допоможемо оформити.</p>'
@@ -1008,7 +1007,7 @@ def confirm_page(o):
         '<a href="https://t.me/+380636324010">Telegram</a></div>'
         '</div></details>'
         '</div>'
-    ) % (oid, rows, fmt_uah(o.get("paymentAmount")), deliv, note, oid, act, esc(label), BOT_NAME, oid, reasons)
+    ) % (oid, rows, fmt_uah(o.get("paymentAmount")), deliv, note, oid, act, esc(label), reasons)
     return page_shell(inner)
 
 def done_page(kind):
