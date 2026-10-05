@@ -962,7 +962,10 @@ PAGE_CSS = """<meta name=viewport content="width=device-width,initial-scale=1">
 .bg::-webkit-details-marker{display:none}details[open] .bg{margin-bottom:10px}
 .ft{padding:12px 18px;border-top:1px solid #f0f0f0;font-size:13px;color:#888}.ft a{color:#f07269;text-decoration:none}
 .ok{text-align:center;padding:26px 18px}.ok .ic{width:60px;height:60px;border-radius:50%;background:#e8f6ef;color:#1d9e75;font-size:30px;line-height:60px;margin:0 auto 14px}
-.ok.gray .ic{background:#f0f0f0;color:#999}</style>"""
+.ok.gray .ic{background:#f0f0f0;color:#999}
+.help{margin-top:6px}.help>summary{list-style:none;color:#888;font-size:13px;text-align:center;cursor:pointer;padding:10px}.help>summary::-webkit-details-marker{display:none}
+.helpbody{font-size:13px;color:#555;line-height:1.5;padding:4px 2px}.helpbody p{margin:0 0 10px}.helpbody b{color:#333}
+.hc{display:flex;gap:8px;margin-top:4px}.hc a{flex:1;text-align:center;border:1px solid #e3e3e3;border-radius:8px;padding:9px;color:#16a34a;text-decoration:none;font-size:13px}</style>"""
 
 def page_shell(inner):
     return ("<!doctype html><html lang=uk><head><meta charset=utf-8><title>Mamulya.lviv</title>" + PAGE_CSS +
@@ -995,6 +998,14 @@ def confirm_page(o):
         '<a class=bp href="/confirm?order=%s&do=%s">%s</a>'
         '<a class=bs href="https://t.me/%s?start=c%s">Підтвердити в Telegram</a>'
         '<details><summary class=bg>Замовлення не актуальне</summary><div style="margin-top:8px">%s</div></details>'
+        '<details class=help><summary>Потрібна допомога?</summary><div class=helpbody>'
+        '<p><b>Не вдалось оплатити завдаток?</b><br>Спробуйте ще раз або зверніться до нас — допоможемо оформити.</p>'
+        '<p><b>Хочете змінити товари чи кількість?</b><br>Напишіть менеджеру — скоригуємо замовлення.</p>'
+        '<p><b>Помилка в номері чи адресі?</b><br>Повідомте правильні дані — виправимо до відправки.</p>'
+        '<div class=hc><a href="tel:+380636324010">Подзвонити</a>'
+        '<a href="viber://chat?number=%%2B380636324010">Viber</a>'
+        '<a href="https://t.me/+380636324010">Telegram</a></div>'
+        '</div></details>'
         '</div>'
     ) % (oid, rows, fmt_uah(o.get("paymentAmount")), deliv, note, oid, act, esc(label), BOT_NAME, oid, reasons)
     return page_shell(inner)
