@@ -47,6 +47,7 @@ try: DB.execute("alter table customers add column src text default ''")
 except Exception: pass
 try: DB.execute("alter table scheduled add column img text default ''")
 except Exception: pass
+DB.execute("create table if not exists noreply(order_id text primary key, ts real)")  # коли замовлення зайшло в NOREPLY
 DB.execute("update customers set src='migrate' where coalesce(src,'')='' and chat_id in (select chat_id from legacy)")
 DB.execute("update customers set src='sms' where coalesce(src,'')='' and coalesce(order_id,'') not in ('', 'demo', 'web', 'migrate', 'qr')")
 DB.execute("update orders set store='Mamulya.lviv' where store='Mamulya'")
@@ -814,6 +815,18 @@ def sync_orders(pages, limit=50):
         time.sleep(7)  # ponytail: ліміт SalesDrive 10 запитів/хв на order/list
     return tot
 
+def auto_cancel_noreply():
+    # NOREPLY 7+ днів без реакції -> Скасований, причина «Немає відповіді» (102)
+    now = time.time()
+    for (oid,) in DB.execute("select order_id from noreply where ?-ts >= ?", (now, 7 * DAY)).fetchall():
+        try:
+            o = sd_order(oid)
+            if o and int(o.get("statusId") or 0) == 10:
+                sd_update(oid, {"statusId": ST_CANCELLED, "rejectionReasonId": 102})
+            DB.execute("delete from noreply where order_id=?", (oid,)); DB.commit()
+        except Exception as e:
+            print("auto_cancel", oid, e)
+
 def cron():
     while True:
         now = time.time()
@@ -882,6 +895,8 @@ def cron():
         except Exception as e: print("sync", e)
         try: ask_reviews()
         except Exception as e: print("reviews", e)
+        try: auto_cancel_noreply()
+        except Exception as e: print("auto_cancel", e)
         time.sleep(3600)
 
 # ---------- order-confirm landing (NOREPLY nudge) ----------
@@ -1114,6 +1129,15 @@ class Hook(BaseHTTPRequestHandler):
         prev_status = (DB.execute("select status from orders where order_id=?", (str(o.get("id")),)).fetchone() or [None])[0]
         save_order(o, product_names(body))
         abuse_check(o)
+        # фіксуємо момент входу в NOREPLY (Mamulya) для авто-скасування на 7-й день
+        try:
+            oid_ = str(o.get("id"))
+            if int(o.get("statusId") or 0) == 10 and STORES.get(int(o.get("sajt") or 0)) == "Mamulya.lviv":
+                DB.execute("insert or ignore into noreply values(?,?)", (oid_, time.time()))
+            else:
+                DB.execute("delete from noreply where order_id=?", (oid_,))
+            DB.commit()
+        except Exception as e: print("noreply-track", e)
         # замовлення отримано (SOLD) → відкриваємо подарунки
         try:
             if int(o.get("statusId") or 0) == 5 and prev_status != 5:
