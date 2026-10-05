@@ -1021,7 +1021,8 @@ def done_page(kind):
                  '<p class=muted style="line-height:1.6">Замовлення підтверджено. Готуємо до відправки, решту сплатите при отриманні.</p></div>')
     else:
         inner = ('<div class="ok gray"><div class=ic>♡</div><p style="font-size:18px;font-weight:600;margin:0 0 6px">Дякуємо за відповідь</p>'
-                 '<p class=muted style="line-height:1.6">Будемо раді бачити вас згодом. Якщо передумаєте — замовлення легко поновити.</p></div>')
+                 '<p class=muted style="line-height:1.6;margin-bottom:18px">Будемо раді бачити вас згодом. Якщо передумаєте — замовлення легко поновити.</p>'
+                 '<a class=bp style="animation:none" href="https://mamulya.lviv.ua/?utm_source=confirm&utm_medium=winback">Завітати в магазин</a></div>')
     return page_shell(inner)
 
 def info_page(text):
