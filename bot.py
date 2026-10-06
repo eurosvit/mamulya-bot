@@ -1196,6 +1196,10 @@ class Hook(BaseHTTPRequestHandler):
             try: DB.execute("insert into clicks values(?,?,?)", (pid, cid, time.time())); DB.commit()
             except Exception as e: print("click", e)
             self.send_response(302); self.send_header("Location", target); self.end_headers(); return
+        if u.path == "/clicksclean" and authed:  # прибрати синтетичні тест-кліки
+            nd = DB.execute("delete from clicks where chat_id in (0, 88888)").rowcount
+            DB.commit()
+            self.send_response(200); self.end_headers(); self.wfile.write(f"deleted {nd} synthetic clicks".encode()); return
         if u.path == "/confirm":  # публічний: сторінка підтвердження замовлення (NOREPLY-нудж)
             oid = qs.get("order", [""])[0]; do = qs.get("do", [""])[0]; reason = qs.get("r", [""])[0]
             test = qs.get("test", [""])[0] == "1"; token = qs.get("t", [""])[0]
