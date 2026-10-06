@@ -1737,12 +1737,26 @@ def admin_page():
 WATCH = [
     ("Головна",            "https://znanamama.com.ua/",                                     lambda t: "ZNANA" in t or "znana" in t.lower()),
     ("Каталог",            "https://znanamama.com.ua/khalaty",                              lambda t: "грн" in t),
-    ("Чекаут",             "https://znanamama.com.ua/checkout",                             lambda t: "Контактні дані" in t),
+    ("Чекаут",             "https://znanamama.com.ua/checkout",                             lambda t: "Лишився один крок" in t),
     ("Пошук міст НП",      "https://znanamama.com.ua/api/np/cities?q=%D0%9A%D0%B8%D1%97%D0%B2", lambda t: '"ref"' in t),
     ("Відділення НП",      "https://znanamama.com.ua/api/np/warehouses?cityRef=8d5a980d-391c-11dd-90d9-001a92567626", lambda t: '"ref"' in t),
     ("Склад (фід)",        "https://znana-stock.onrender.com/export/rozetka.xml",            lambda t: "<offer" in t),
     ("Підрахунок кошика",  "https://znana-stock.onrender.com/api/health",                    lambda t: '"ok":true' in t.replace(" ", "")),
+    # сторінка може відкритись, а скрипти не завантажитись — тоді нічого не
+    # натискається, хоча «сайт працює». Тягнемо перший чанк із самої сторінки.
+    ("Скрипти сайту",      "https://znanamama.com.ua/checkout",                             lambda t: chunk_ok(t)),
 ]
+
+def chunk_ok(html):
+    m = re.search(r'/_next/static/[^"\']+?\.js', html)
+    if not m: return False
+    try:
+        # без свого User-Agent Cloudflare відповідає 403 — тоді сторож кричав би
+        # про поламаний сайт, який насправді працює
+        req = urllib.request.Request("https://znanamama.com.ua" + m.group(0), headers={"User-Agent": "znana-watchdog"})
+        return urllib.request.urlopen(req, timeout=20).status == 200
+    except Exception:
+        return False
 
 def watch_check(name, url, ok):
     try:
