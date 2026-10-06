@@ -1730,7 +1730,55 @@ def admin_page():
 {det("⚙️ Усі тексти повідомлень", f"<table>{cfg_texts}</table>")}
 </div></html>"""
 
+# ---------- сторож сайту ----------
+# Живе в боті, а не на самому сайті: сервіс, який впав, про себе не напише.
+# Перевіряє не «чи відповідає сервер», а чи працює те, що приносить гроші:
+# сторінка каталогу, чекаут, пошук міст і відділень Нової Пошти, склад.
+WATCH = [
+    ("Головна",            "https://znanamama.com.ua/",                                     lambda t: "ZNANA" in t or "znana" in t.lower()),
+    ("Каталог",            "https://znanamama.com.ua/khalaty",                              lambda t: "грн" in t),
+    ("Чекаут",             "https://znanamama.com.ua/checkout",                             lambda t: "Контактні дані" in t),
+    ("Пошук міст НП",      "https://znanamama.com.ua/api/np/cities?q=%D0%9A%D0%B8%D1%97%D0%B2", lambda t: '"ref"' in t),
+    ("Відділення НП",      "https://znanamama.com.ua/api/np/warehouses?cityRef=8d5a980d-391c-11dd-90d9-001a92567626", lambda t: '"ref"' in t),
+    ("Склад (фід)",        "https://znana-stock.onrender.com/export/rozetka.xml",            lambda t: "<offer" in t),
+    ("Підрахунок кошика",  "https://znana-stock.onrender.com/api/health",                    lambda t: '"ok":true' in t.replace(" ", "")),
+]
+
+def watch_check(name, url, ok):
+    try:
+        body = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "znana-watchdog"}),
+                                      timeout=25).read().decode("utf-8", "ignore")
+        return (bool(ok(body)), "сторінка відкрилась, але вміст не той")
+    except urllib.error.HTTPError as e:
+        return (False, f"HTTP {e.code}")
+    except Exception as e:
+        return (False, str(e)[:60])
+
+def watchdog():
+    """Два провали поспіль — тривога, щоб не смикати через одну мережеву ікавку.
+    Про відновлення теж пишемо: інакше не зрозуміло, чи воно само минулось."""
+    state = {}
+    while True:
+        for name, url, ok in WATCH:
+            good, why = watch_check(name, url, ok)
+            st = state.setdefault(name, {"fails": 0, "told": False})
+            if good:
+                if st["told"]:
+                    for a in ADMINS:
+                        try: send(a, f"🟢 <b>Znana: {name}</b> знову працює")
+                        except Exception: pass
+                st["fails"], st["told"] = 0, False
+                continue
+            st["fails"] += 1
+            if st["fails"] >= 2 and not st["told"]:
+                st["told"] = True
+                for a in ADMINS:
+                    try: send(a, f"🔴 <b>Znana: {name}</b> не працює\n{why}\n{url}")
+                    except Exception: pass
+        time.sleep(300)
+
 if __name__ == "__main__":
+    threading.Thread(target=watchdog, daemon=True).start()
     threading.Thread(target=poll, daemon=True).start()
     if OLD_TOKEN: threading.Thread(target=poll_old, daemon=True).start()
     threading.Thread(target=cron, daemon=True).start()
