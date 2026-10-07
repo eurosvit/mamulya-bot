@@ -518,6 +518,20 @@ def run_broadcast(seg, body, btn, img=None, exclude=None):
     DB.commit()
     return ok, len(ids)
 
+def add_scheduled(arg):
+    # парсить "ДД.ММ ГГ:ХХ сегмент текст || кнопка @img url" і ставить у scheduled; повертає (sid, run_ts, seg, cnt)
+    m = re.match(r"(\d{1,2})\.(\d{1,2})\s+(\d{1,2}):(\d{2})\s+(\S+)\s+(.+)", arg.strip(), re.S)
+    if not m: raise ValueError("format")
+    d, mo, hh, mm, seg, rest = m.groups()
+    yr = time.localtime().tm_year
+    run_ts = time.mktime((yr, int(mo), int(d), int(hh), int(mm), 0, 0, 0, -1))
+    if run_ts < time.time(): run_ts = time.mktime((yr + 1, int(mo), int(d), int(hh), int(mm), 0, 0, 0, -1))
+    body, btn, img = parse_button(rest.strip())
+    cur = DB.execute("insert into scheduled(run_ts,seg,body,btn,img) values(?,?,?,?,?)",
+                     (run_ts, seg.lower(), body, "|".join(btn) if btn else "", img or ""))
+    DB.commit()
+    return cur.lastrowid, run_ts, seg.lower(), len(resolve_ids(seg.lower()))
+
 def on_text(chat_id, text):
     t = text.strip()
     if t == "🎁 Подарунки":
@@ -587,22 +601,15 @@ def on_text(chat_id, text):
                 st = f"✅ {snt}/{tot}" if done else "⏳ очікує"
                 out.append(f"#{sid} · {when} · {seg or 'всі'} · {st}" + ("" if done else f" · <code>/schedule cancel {sid}</code>"))
             return send(chat_id, "\n".join(out))
-        m = re.match(r"(\d{1,2})\.(\d{1,2})\s+(\d{1,2}):(\d{2})\s+(\S+)\s+(.+)", arg, re.S)
-        if not m: return send(chat_id, "Формат: <code>/schedule ДД.ММ ГГ:ХХ сегмент текст || кнопка</code>")
-        d, mo, hh, mm, seg, rest = m.groups()
-        yr = time.localtime().tm_year
-        try: run_ts = time.mktime((yr, int(mo), int(d), int(hh), int(mm), 0, 0, 0, -1))
-        except Exception: return send(chat_id, "Не зрозумів дату.")
-        if run_ts < time.time(): run_ts = time.mktime((yr + 1, int(mo), int(d), int(hh), int(mm), 0, 0, 0, -1))
-        body, btn, img = parse_button(rest.strip())
-        btn_s = "|".join(btn) if btn else ""
-        cnt = len(resolve_ids(seg.lower()))
-        cur = DB.execute("insert into scheduled(run_ts,seg,body,btn,img) values(?,?,?,?,?)", (run_ts, seg.lower(), body, btn_s, img or ""))
-        DB.commit()
+        try:
+            sid, run_ts, seg, cnt = add_scheduled(arg)
+        except ValueError:
+            return send(chat_id, "Формат: <code>/schedule ДД.ММ ГГ:ХХ сегмент текст || кнопка</code>")
+        body, btn, img = parse_button(arg.split(" ", 3)[3] if len(arg.split(" ", 3)) > 3 else "")
         when = time.strftime("%d.%m о %H:%M", time.localtime(run_ts))
         prev = personalize(body, chat_id)
         pnote = "\n\n<i>(приклад заповнення — на вашому імені й сумі; кожен отримає свої)</i>" if "{" in body else ""
-        return send(chat_id, f"✅ Заплановано #{cur.lastrowid} на <b>{when}</b>\nСегмент: <b>{seg.lower()}</b> (~{cnt} отримувачів)" + (" · з кнопкою" if btn else "") + (" · з фото" if img else "") + f"\n\nПревʼю:\n{prev}{pnote}")
+        return send(chat_id, f"✅ Заплановано #{sid} на <b>{when}</b>\nСегмент: <b>{seg}</b> (~{cnt} отримувачів)" + (" · з кнопкою" if btn else "") + (" · з фото" if img else "") + f"\n\nПревʼю:\n{prev}{pnote}")
     if chat_id in ADMINS and t == "/postold":
         n_ = DB.execute("select count(*) from legacy").fetchone()[0]
         lvl = near = zero = 0
@@ -1200,6 +1207,13 @@ class Hook(BaseHTTPRequestHandler):
             nd = DB.execute("delete from clicks where chat_id in (0, 88888)").rowcount
             DB.commit()
             self.send_response(200); self.end_headers(); self.wfile.write(f"deleted {nd} synthetic clicks".encode()); return
+        if u.path == "/schedadd" and authed:  # запланувати розсилку: ?cmd=ДД.ММ ГГ:ХХ сегмент текст || кнопка
+            try:
+                sid, run_ts, seg, cnt = add_scheduled(qs.get("cmd", [""])[0])
+                msg = f"scheduled #{sid} {seg} {time.strftime('%d.%m %H:%M', time.localtime(run_ts))} ~{cnt}"
+            except Exception as e:
+                msg = f"error: {e}"
+            self.send_response(200); self.end_headers(); self.wfile.write(msg.encode()); return
         if u.path == "/confirm":  # публічний: сторінка підтвердження замовлення (NOREPLY-нудж)
             oid = qs.get("order", [""])[0]; do = qs.get("do", [""])[0]; reason = qs.get("r", [""])[0]
             test = qs.get("test", [""])[0] == "1"; token = qs.get("t", [""])[0]
