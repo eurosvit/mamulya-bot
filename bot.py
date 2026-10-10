@@ -1207,6 +1207,11 @@ class Hook(BaseHTTPRequestHandler):
             nd = DB.execute("delete from clicks where chat_id in (0, 88888)").rowcount
             DB.commit()
             self.send_response(200); self.end_headers(); self.wfile.write(f"deleted {nd} synthetic clicks".encode()); return
+        if u.path == "/scheddel" and authed:  # скасувати заплановану розсилку ?id=N
+            sid = int(qs.get("id", ["0"])[0] or 0)
+            nd = DB.execute("delete from scheduled where id=? and done=0", (sid,)).rowcount
+            DB.commit()
+            self.send_response(200); self.end_headers(); self.wfile.write(f"deleted {nd}".encode()); return
         if u.path == "/schedadd" and authed:  # запланувати розсилку: ?cmd=ДД.ММ ГГ:ХХ сегмент текст || кнопка
             try:
                 sid, run_ts, seg, cnt = add_scheduled(qs.get("cmd", [""])[0])
