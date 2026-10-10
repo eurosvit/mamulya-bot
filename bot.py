@@ -518,6 +518,23 @@ def run_broadcast(seg, body, btn, img=None, exclude=None):
     DB.commit()
     return ok, len(ids)
 
+def looks_male(name):
+    # укр. жіночі імена майже всі на -а/-я; без імені або жіноче → не чоловік (не виключаємо)
+    if not name: return False
+    fn = name.strip().split()[0].lower() if name.strip() else ""
+    MALE_EXC = {"микита", "ілля", "кузьма", "сава", "хома", "фома", "мина", "лука", "нікіта", "данила"}
+    FEM_CONS = {"любов", "адель", "нінель", "рахіль", "ізабель", "мірабель"}
+    if not fn: return False
+    if fn in MALE_EXC: return True
+    if fn in FEM_CONS: return False
+    return fn[-1] not in "ая"
+
+def name_of(cid, phone):
+    r = (DB.execute("select name from names where phone=?", (phone,)).fetchone() if phone else None)
+    if r and r[0]: return r[0]
+    r = DB.execute("select name from legacy where chat_id=?", (cid,)).fetchone()
+    return (r[0] if r and r[0] else "")
+
 def add_scheduled(arg):
     # парсить "ДД.ММ ГГ:ХХ сегмент текст || кнопка @img url" і ставить у scheduled; повертає (sid, run_ts, seg, cnt)
     m = re.match(r"(\d{1,2})\.(\d{1,2})\s+(\d{1,2}):(\d{2})\s+(\S+)\s+(.+)", arg.strip(), re.S)
@@ -599,8 +616,18 @@ def on_text(chat_id, text):
             for sid, rts, seg, done, snt, tot in rows:
                 when = time.strftime("%d.%m %H:%M", time.localtime(rts))
                 st = f"✅ {snt}/{tot}" if done else "⏳ очікує"
-                out.append(f"#{sid} · {when} · {seg or 'всі'} · {st}" + ("" if done else f" · <code>/schedule cancel {sid}</code>"))
+                out.append(f"#{sid} · {when} · {seg or 'всі'} · {st} · текст: <code>/schedule {sid}</code>" + ("" if done else f" · <code>/schedule cancel {sid}</code>"))
             return send(chat_id, "\n".join(out))
+        if arg.isdigit():  # /schedule <id> — повний текст запланованої
+            r = DB.execute("select run_ts,seg,body,btn,img,done,sent,total from scheduled where id=?", (int(arg),)).fetchone()
+            if not r: return send(chat_id, f"Розсилки #{arg} нема.")
+            rts, seg, body, btn, img, done, snt, tot = r
+            when = time.strftime("%d.%m о %H:%M", time.localtime(rts))
+            st = f"✅ надіслано {snt}/{tot}" if done else f"⏳ очікує · ~{len(resolve_ids((seg or '').lower()))} отримувачів"
+            head = f"📨 <b>Розсилка #{arg}</b>\n{when} · {seg or 'всі'} · {st}"
+            head += f"\n🔘 кнопка: {btn.split('|')[0]}" if btn else ""
+            head += "\n🖼 з фото" if img else ""
+            return send(chat_id, head + "\n\n<b>Повний текст:</b>\n" + personalize(body, chat_id))
         try:
             sid, run_ts, seg, cnt = add_scheduled(arg)
         except ValueError:
@@ -1207,6 +1234,16 @@ class Hook(BaseHTTPRequestHandler):
             nd = DB.execute("delete from clicks where chat_id in (0, 88888)").rowcount
             DB.commit()
             self.send_response(200); self.end_headers(); self.wfile.write(f"deleted {nd} synthetic clicks".encode()); return
+        if u.path == "/exclmen" and authed:  # виключити чоловіків із запланованої ?id=N (за іменем)
+            sid = int(qs.get("id", ["0"])[0] or 0)
+            seg = (DB.execute("select seg from scheduled where id=?", (sid,)).fetchone() or [""])[0]
+            n_ = 0
+            for cid in resolve_ids((seg or "").lower()):
+                ph = (DB.execute("select coalesce(phone,'') from customers where chat_id=?", (cid,)).fetchone() or [""])[0]
+                if looks_male(name_of(cid, ph)):
+                    if DB.execute("insert or ignore into sched_excl values(?,?)", (sid, cid)).rowcount: n_ += 1
+            DB.commit()
+            self.send_response(200); self.end_headers(); self.wfile.write(f"excluded {n_} men from #{sid}".encode()); return
         if u.path == "/scheddel" and authed:  # скасувати заплановану розсилку ?id=N
             sid = int(qs.get("id", ["0"])[0] or 0)
             nd = DB.execute("delete from scheduled where id=? and done=0", (sid,)).rowcount
