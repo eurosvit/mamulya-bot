@@ -1770,30 +1770,39 @@ def kpi_page(store=None):
     upd = DB.execute("select max(updated) from kpi_cache").fetchone()[0]
     upd_s = time.strftime("%d.%m %H:%M", time.localtime(upd)) if upd else "—"
     def cell(num, den, color, good=None, hi=None):
-        if not den: return "<td class=n style=color:#C9BDB8>—</td>"
+        if not den: return "<td>—</td>"
         p = num / den * 100
         col = color
         if hi is not None: col = "#2E8B57" if (p <= hi) else "#B8325A"
         if good is not None: col = "#2E8B57" if (p >= good) else "#B8325A"
-        return f"<td class=n style=color:{col}><b>{p:.1f}%</b> <span style=color:#A1939A;font-weight:400>({num})</span></td>"
+        return f"<td style=color:{col}><b>{p:.1f}%</b> <span style=color:#A1939A;font-weight:400>({num})</span></td>"
     out = ""
+    tz = tc = td_ = ts = trn = trd = 0
     for ym, zay, canc, decl, sold, rn, rd in rows:
         y, mm = ym.split("-"); nm = f"{UA_MON[int(mm)]} {y}"
-        out += (f"<tr><td>{nm}</td><td class=n>{zay}</td>"
+        tz += zay; tc += canc; td_ += decl; ts += sold; trn += rn; trd += rd
+        out += (f"<tr><td>{nm}</td><td>{zay}</td>"
                 + cell(canc, zay, "#B8325A", hi=18)
                 + cell(decl, zay, "#A86A1F")
                 + cell(sold, zay, "#2E8B57")
                 + cell(rn, rd, "#7C3AED", good=15) + "</tr>")
+    if rows:
+        out += (f"<tr style=border-top:2px solid #E8DCD8;font-weight:700><td>Разом</td><td>{tz}</td>"
+                + cell(tc, tz, "#B8325A", hi=18)
+                + cell(td_, tz, "#A86A1F")
+                + cell(ts, tz, "#2E8B57")
+                + cell(trn, trd, "#7C3AED", good=15) + "</tr>")
     empty = not rows
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>KPI — {STORE}</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
 {CAB_CSS}
+<style>#kt th,#kt td{{text-align:left !important}}#kt th:first-child,#kt td:first-child{{min-width:120px}}</style>
 <div class=top><h1>📈 KPI · по місяцях</h1><span class=upd>дані SalesDrive, оновлено {upd_s}</span></div>
 {_nav("KPI", AK)}
 <div class=nav style=margin-top:-6px>{sw}</div>
 <section class="p wide"><h2>KPI по місяцях <small>{STORE} · джерело SalesDrive · % і кількість у дужках</small></h2>
-<table><tr><th>Місяць</th><th>Заявки</th><th>Скасовано ≤18%</th><th>Відмова</th><th>Продано</th><th>Повторні ≥15%</th></tr>{out or ('<tr><td>ще не завантажено — тисни «Оновити з SalesDrive»</td></tr>' if empty else '')}</table>
+<table id=kt><tr><th>Місяць</th><th>Заявки</th><th>Скасовано ≤18%</th><th>Відмова</th><th>Продано</th><th>Повторні ≥15%</th></tr>{out or ('<tr><td>ще не завантажено — тисни «Оновити з SalesDrive»</td></tr>' if empty else '')}</table>
 <p style=color:#A1939A;font-size:12px>У клітинці: <b>% (кількість)</b>. <b>Заявки</b> — усі замовлення місяця без тесту й видалених (видалені = спам/дублі). <b>Скасовано</b> = «Скасований» до відправки ÷ заявки (ціль ≤18%, зелений — у нормі). <b>Відмова</b> = Decline (не викупили посилку) — пізній статус, свіжий місяць занижує. <b>Продано</b> = SOLD ÷ заявки. <b>Повторні</b> = покупці місяця, що вже купували раніше ÷ усі покупці (ціль ≥15%; ранні місяці занижені, бо історія рахується з наявних даних). Усе прямо з SalesDrive, кожне замовлення — раз.</p>
 <p><a href="/kpirefresh?key={AK}" style="display:inline-block;background:#C94F72;color:#fff;padding:7px 16px;border-radius:8px;font-size:13px">↻ Оновити з SalesDrive</a> <span style=color:#A1939A;font-size:12px>займає ~10 хв (ліміти SalesDrive; з історією для «Повторні»)</span></p></section>
 </div></html>"""
