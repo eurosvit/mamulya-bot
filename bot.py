@@ -862,10 +862,13 @@ def kpi_refresh():
             last = calendar.monthrange(y, m)[1]
             base = f"?filter[orderTime][from]={y:04d}-{m:02d}-01 00:00:00&filter[orderTime][to]={y:04d}-{m:02d}-{last:02d} 23:59:59{sj}&page=1&limit=1"
             try:
-                zay = sd_count(base); time.sleep(7)
-                canc = sd_count(base + "&filter[statusId]=13"); time.sleep(7)
-                decl = sd_count(base + "&filter[statusId]=6"); time.sleep(7)
-                sold = sd_count(base + "&filter[statusId]=5"); time.sleep(7)
+                allc = sd_count(base) or 0; time.sleep(7)
+                test = sd_count(base + "&filter[statusId]=15") or 0; time.sleep(7)
+                dele = sd_count(base + "&filter[statusId]=8") or 0; time.sleep(7)
+                canc = sd_count(base + "&filter[statusId]=13") or 0; time.sleep(7)
+                decl = sd_count(base + "&filter[statusId]=6") or 0; time.sleep(7)
+                sold = sd_count(base + "&filter[statusId]=5") or 0; time.sleep(7)
+                zay = allc - test - dele   # чиста база: без тесту(15) і видалених(8, часто спам/дублі)
                 DB.execute("insert or replace into kpi_cache values(?,?,?,?,?,?,?)", (store, f"{y:04d}-{m:02d}", zay, canc, decl, sold, time.time()))
                 DB.commit()
             except Exception as e:
@@ -1760,7 +1763,7 @@ def kpi_page(store=None):
 <div class=nav style=margin-top:-6px>{sw}</div>
 <section class="p wide"><h2>Скасування і продажі <small>{STORE} · джерело SalesDrive · ціль: скасування ≤18%</small></h2>
 <table><tr><th>Місяць</th><th>Заявки</th><th>Скасовано</th><th>шт</th><th>Відмова</th><th>шт</th><th>Продано</th><th>шт</th></tr>{out or ('<tr><td>ще не завантажено — тисни «Оновити з SalesDrive»</td></tr>' if empty else '')}</table>
-<p style=color:#A1939A;font-size:12px><b>Скасовано</b> = статус «Скасований» (до відправки) ÷ заявки (ціль ≤18%). <b>Відмова</b> = Decline (не викупили посилку) ÷ заявки — пізній статус, свіжий місяць занижує. <b>Продано</b> = статус SOLD ÷ заявки. Числа прямо з SalesDrive. Оновлення раз на день автоматично; «Повторні/ретеншн» додам окремо (треба прохід по історії покупців).</p>
+<p style=color:#A1939A;font-size:12px><b>Заявки</b> = усі замовлення місяця <b>без тесту й видалених</b> (видалені = зазвичай спам/дублі). <b>Скасовано</b> = статус «Скасований» (до відправки) ÷ заявки (ціль ≤18%). <b>Відмова</b> = Decline (не викупили посилку) ÷ заявки — пізній статус, свіжий місяць занижує. <b>Продано</b> = SOLD ÷ заявки. Числа прямо з SalesDrive, кожне замовлення рахується раз. Оновлення раз на день автоматично; «Повторні/ретеншн» додам окремо (треба прохід по історії покупців).</p>
 <p><a href="/kpirefresh?key={AK}" style="display:inline-block;background:#C94F72;color:#fff;padding:7px 16px;border-radius:8px;font-size:13px">↻ Оновити з SalesDrive</a> <span style=color:#A1939A;font-size:12px>займає ~5 хв (ліміти SalesDrive)</span></p></section>
 </div></html>"""
 
