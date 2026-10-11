@@ -1807,6 +1807,7 @@ def kpi_page(store=None):
 <div class=top><h1>📈 KPI · по місяцях</h1><span class=upd>дані SalesDrive, оновлено {upd_s}</span></div>
 {_nav("KPI", AK)}
 <div class=nav style=margin-top:-6px>{sw}</div>
+<div class=grid>
 <section class="p wide"><h2>KPI по місяцях <small>{STORE} · джерело SalesDrive · % і кількість у дужках</small></h2>
 <table id=kt><tr><th>Місяць</th><th>Заявки</th><th>Скасовано ≤18%</th><th>Відмова</th><th>Продано</th><th>Повторні ≥15%</th></tr>{out or ('<tr><td>ще не завантажено — тисни «Оновити з SalesDrive»</td></tr>' if empty else '')}</table>
 <div style=color:#6E5F65;font-size:12.5px;margin-top:8px>
@@ -1821,6 +1822,7 @@ def kpi_page(store=None):
 <p style=margin:6px 0 0>Усе прямо з SalesDrive, кожне замовлення рахується раз.</p>
 </div>
 <p><a href="/kpirefresh?key={AK}" style="display:inline-block;background:#C94F72;color:#fff;padding:7px 16px;border-radius:8px;font-size:13px">↻ Оновити з SalesDrive</a> <span style=color:#A1939A;font-size:12px>займає ~10 хв (ліміти SalesDrive; з історією для «Повторні»)</span></p></section>
+</div>
 </div></html>"""
 
 def _nav(active, AK):
