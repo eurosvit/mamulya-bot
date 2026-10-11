@@ -883,10 +883,10 @@ def kpi_refresh():
         except Exception as e:
             print("kpi_pull", store, e); continue
         M = defaultdict(lambda: {"zay": 0, "canc": 0, "decl": 0, "sold": 0})
-        # перше підтверджене замовлення кожного телефону (за часом) — щоб відрізнити повторну покупку
+        # повторні рахуємо ЛИШЕ по SOLD (реально отримане) — інакше ловимо дублі-заявки
         first = {}
         for ph, ot, st in orders:
-            if ph and st not in (6, 7, 13, 15, 8):
+            if ph and st == 5:
                 if ph not in first or ot < first[ph]: first[ph] = ot
         buyers = defaultdict(set); repeat = defaultdict(set)
         for ph, ot, st in orders:
@@ -896,9 +896,9 @@ def kpi_refresh():
                 if st == 13: d["canc"] += 1
                 if st == 6: d["decl"] += 1
                 if st == 5: d["sold"] += 1
-            if ph and st not in (6, 7, 13, 15, 8):   # підтверджене
+            if ph and st == 5:              # SOLD → покупець місяця
                 buyers[ym].add(ph)
-                if ot > first[ph]: repeat[ym].add(ph)   # не перша покупка клієнта → повторний
+                if ot > first[ph]: repeat[ym].add(ph)   # не перша отримана покупка → повторний
         for ym, d in M.items():
             if ym < "2026-09": continue
             B = buyers.get(ym, set()); R = repeat.get(ym, set())
@@ -1816,7 +1816,7 @@ def kpi_page(store=None):
 <li><b>Скасовано</b> — статус «Скасований» до відправки ÷ заявки. Ціль <b>≤18%</b> (зелений = у нормі).</li>
 <li><b>Відмова</b> — Decline, не викупили посилку. Пізній статус — свіжий місяць занижує.</li>
 <li><b>Продано</b> — статус SOLD ÷ заявки.</li>
-<li><b>Повторні</b> — покупці місяця, для кого це <b>не перша покупка</b> (враховуючи й повтор у тому ж місяці) ÷ усі покупці. Ціль <b>≥15%</b>. Історія рахується з усіх даних SalesDrive.</li>
+<li><b>Повторні</b> — рахуються лише по <b>отриманих (SOLD)</b> замовленнях: покупці місяця, для кого це не перша отримана покупка ÷ усі, хто отримав того місяця. Ціль <b>≥15%</b>. Історія з усіх даних SalesDrive.</li>
 </ul>
 <p style=margin:6px 0 0>Усе прямо з SalesDrive, кожне замовлення рахується раз.</p>
 </div>
