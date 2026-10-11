@@ -28,6 +28,7 @@ create table if not exists b2b(phone text primary key);
 create table if not exists scheduled(id integer primary key autoincrement, run_ts real, seg text, body text, btn text, done int default 0, sent int default 0, total int default 0, img text default '');
 create table if not exists sched_excl(sid int, chat_id int, primary key(sid, chat_id));
 create table if not exists clicks(pid int, chat_id int, ts real);
+create table if not exists kpi_cache(store text, ym text, zay int, canc int, decl int, sold int, updated real, primary key(store, ym));
 """)
 try: DB.execute("alter table orders add column amount real default 0")
 except Exception: pass
@@ -833,6 +834,44 @@ def poll():
             print("poll", e); time.sleep(5)
 
 # ---------- lifecycle cron ----------
+KPI_STORES = [("Mamulya", [94, 97]), ("Modnamama", [120, 150]), ("Znana Mama", [164]), ("Lipoland", [170]), ("AntiAge", [22])]
+
+def sd_count(qs):
+    # totals.count для фільтра SalesDrive (з ретраєм на 400 = ліміт)
+    url = "https://aleyana.salesdrive.me/api/order/list/" + qs.replace(" ", "%20")
+    for attempt in range(4):
+        try:
+            r = json.load(urllib.request.urlopen(urllib.request.Request(url, headers={"Form-Api-Key": os.environ["SALESDRIVE_KEY"]}), timeout=40))
+            return (r.get("totals") or {}).get("count", 0)
+        except urllib.error.HTTPError as e:
+            if e.code != 400 or attempt == 3: raise
+            time.sleep(65)
+
+def kpi_refresh():
+    if not os.environ.get("SALESDRIVE_KEY"): return
+    import calendar
+    now = time.localtime()
+    months = []
+    y, m = 2026, 9
+    while (y, m) <= (now.tm_year, now.tm_mon):
+        months.append((y, m)); m += 1
+        if m > 12: m = 1; y += 1
+    for store, sajts in KPI_STORES:
+        sj = "".join(f"&filter[sajt][]={s}" for s in sajts)
+        for (y, m) in months:
+            last = calendar.monthrange(y, m)[1]
+            base = f"?filter[orderTime][from]={y:04d}-{m:02d}-01 00:00:00&filter[orderTime][to]={y:04d}-{m:02d}-{last:02d} 23:59:59{sj}&page=1&limit=1"
+            try:
+                zay = sd_count(base); time.sleep(7)
+                canc = sd_count(base + "&filter[statusId]=13"); time.sleep(7)
+                decl = sd_count(base + "&filter[statusId]=6"); time.sleep(7)
+                sold = sd_count(base + "&filter[statusId]=5"); time.sleep(7)
+                DB.execute("insert or replace into kpi_cache values(?,?,?,?,?,?,?)", (store, f"{y:04d}-{m:02d}", zay, canc, decl, sold, time.time()))
+                DB.commit()
+            except Exception as e:
+                print("kpi_refresh", store, y, m, e)
+    print("kpi_refresh done")
+
 def sync_orders(pages, limit=50):
     if not os.environ.get("SALESDRIVE_KEY"): return 0
     tot = 0
@@ -933,6 +972,10 @@ def cron():
         except Exception as e: print("reviews", e)
         try: auto_cancel_noreply()
         except Exception as e: print("auto_cancel", e)
+        try:  # KPI з SalesDrive — раз на добу
+            last = DB.execute("select max(updated) from kpi_cache").fetchone()[0]
+            if not last or now - last > 20 * 3600: kpi_refresh()
+        except Exception as e: print("kpi_cron", e)
         time.sleep(3600)
 
 # ---------- order-confirm landing (NOREPLY nudge) ----------
@@ -1397,6 +1440,9 @@ class Hook(BaseHTTPRequestHandler):
         if u.path == "/kpi" and authed:
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
             self.wfile.write(kpi_page(qs.get("store", [None])[0]).encode()); return
+        if u.path == "/kpirefresh" and authed:
+            threading.Thread(target=kpi_refresh, daemon=True).start()
+            self.send_response(302); self.send_header("Location", f"/kpi?key={os.environ.get('ADMIN_KEY','')}"); self.end_headers(); return
         if u.path == "/sched" and authed:
             sid = int(qs.get("id", ["0"])[0])
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
@@ -1684,52 +1730,38 @@ details.p[open] summary{margin-bottom:8px}
 
 def kpi_page(store=None):
     AK = os.environ.get("ADMIN_KEY", "")
-    all_stores = [r[0] for r in DB.execute("select store, count(*) c from orders where coalesce(store,'')!='' and status!=15 group by store having c>=50 order by c desc")]
-    STORE = store if store in all_stores else (all_stores[0] if all_stores else "Mamulya.lviv")
+    order = [s for s, _ in KPI_STORES]
+    have = set(r[0] for r in DB.execute("select distinct store from kpi_cache"))
+    all_stores = [s for s in order if s in have] or order
+    STORE = store if store in all_stores else all_stores[0]
     sw = "".join(f'<a class="{"on" if s==STORE else ""}" href="/kpi?key={AK}&store={urllib.parse.quote(s)}">{s}</a>' for s in all_stores)
-    rows = DB.execute("select phone, ts, amount, status from orders where store=? and coalesce(phone,'')!='' and status not in (15,8)", (STORE,)).fetchall()
-    mon = lambda t: time.strftime("%Y-%m", time.localtime(t))
-    CONF = lambda s: s not in (6, 7, 13, 15, 8)   # підтверджене (не скасоване/відмова/спам/тест/видалене/повернення)
-    first_conf = {}            # телефон -> ts першого підтвердженого замовлення
-    for ph, ts, amt, st in sorted(rows, key=lambda r: r[1]):
-        if CONF(st) and ph not in first_conf: first_conf[ph] = ts
-    from collections import defaultdict
-    M = defaultdict(lambda: {"zay": 0, "canc": 0, "decl": 0, "buyers": set(), "ret": set()})
-    for ph, ts, amt, st in rows:
-        m = mon(ts)
-        if m < "2026-09": continue   # рахунок з вересня
-        d = M[m]
-        d["zay"] += 1
-        if st == 13: d["canc"] += 1   # Скасований (до відправки)
-        if st == 6: d["decl"] += 1    # Decline — відмова від посилки
-        if CONF(st):
-            d["buyers"].add(ph)
-            mstart = time.mktime(time.strptime(m + "-01", "%Y-%m-%d"))
-            if first_conf.get(ph, ts) < mstart: d["ret"].add(ph)
-    out = ""
     UA_MON = ["", "січень", "лютий", "березень", "квітень", "травень", "червень", "липень", "серпень", "вересень", "жовтень", "листопад", "грудень"]
-    for m in sorted(M, reverse=True):
-        d = M[m]
-        cancp = d["canc"] / d["zay"] * 100 if d["zay"] else 0
-        declp = d["decl"] / d["zay"] * 100 if d["zay"] else 0
-        retp = len(d["ret"]) / len(d["buyers"]) * 100 if d["buyers"] else 0
-        y, mm = m.split("-"); nm = f"{UA_MON[int(mm)]} {y}"
+    rows = DB.execute("select ym, zay, canc, decl, sold, updated from kpi_cache where store=? order by ym desc", (STORE,)).fetchall()
+    upd = DB.execute("select max(updated) from kpi_cache").fetchone()[0]
+    upd_s = time.strftime("%d.%m %H:%M", time.localtime(upd)) if upd else "—"
+    out = ""
+    for ym, zay, canc, decl, sold, _ in rows:
+        cancp = canc / zay * 100 if zay else 0
+        declp = decl / zay * 100 if zay else 0
+        soldp = sold / zay * 100 if zay else 0
+        y, mm = ym.split("-"); nm = f"{UA_MON[int(mm)]} {y}"
         cc = "#B8325A" if cancp > 18 else "#2E8B57"
-        rc = "#2E8B57" if retp >= 15 else "#B8325A"
-        out += (f"<tr><td>{nm}</td><td class=n>{d['zay']}</td>"
-                f"<td class=n style=color:{cc}><b>{cancp:.1f}%</b></td><td class=n style=color:#A1939A>{d['canc']}</td>"
-                f"<td class=n style=color:#A86A1F><b>{declp:.1f}%</b></td><td class=n style=color:#A1939A>{d['decl']}</td>"
-                f"<td class=n style=color:{rc}><b>{retp:.1f}%</b></td><td class=n style=color:#A1939A>{len(d['ret'])}/{len(d['buyers'])}</td></tr>")
+        out += (f"<tr><td>{nm}</td><td class=n>{zay}</td>"
+                f"<td class=n style=color:{cc}><b>{cancp:.1f}%</b></td><td class=n style=color:#A1939A>{canc}</td>"
+                f"<td class=n style=color:#A86A1F><b>{declp:.1f}%</b></td><td class=n style=color:#A1939A>{decl}</td>"
+                f"<td class=n style=color:#2E8B57><b>{soldp:.1f}%</b></td><td class=n style=color:#A1939A>{sold}</td></tr>")
+    empty = not rows
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>KPI — {STORE}</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
 {CAB_CSS}
-<div class=top><h1>📈 KPI · по місяцях</h1><span class=upd>оновлено {time.strftime("%d.%m %H:%M")}</span></div>
+<div class=top><h1>📈 KPI · по місяцях</h1><span class=upd>дані SalesDrive, оновлено {upd_s}</span></div>
 {_nav("KPI", AK)}
 <div class=nav style=margin-top:-6px>{sw}</div>
-<section class="p wide"><h2>Ретеншн і скасування <small>{STORE} · з бази замовлень бота · ціль: скасування ≤18%, ретеншн ≥15%</small></h2>
-<table><tr><th>Місяць</th><th>Заявки</th><th>Скасовано</th><th>шт</th><th>Відмова</th><th>шт</th><th>Повторні</th><th>×/усіх</th></tr>{out or '<tr><td>нема даних</td></tr>'}</table>
-<p style=color:#A1939A;font-size:12px><b>Скасовано</b> = статус «Скасований» (до відправки) ÷ усі заявки місяця (ціль ≤18%). <b>Відмова</b> = статус Decline (відмова від посилки) ÷ усі заявки. <b>Повторні</b> = покупці місяця, що вже мали підтверджене замовлення раніше, ÷ усі покупці місяця. Рахунок з вересня; «повторні» в ранніх місяцях занижені (повна історія лише в SalesDrive).</p></section>
+<section class="p wide"><h2>Скасування і продажі <small>{STORE} · джерело SalesDrive · ціль: скасування ≤18%</small></h2>
+<table><tr><th>Місяць</th><th>Заявки</th><th>Скасовано</th><th>шт</th><th>Відмова</th><th>шт</th><th>Продано</th><th>шт</th></tr>{out or ('<tr><td>ще не завантажено — тисни «Оновити з SalesDrive»</td></tr>' if empty else '')}</table>
+<p style=color:#A1939A;font-size:12px><b>Скасовано</b> = статус «Скасований» (до відправки) ÷ заявки (ціль ≤18%). <b>Відмова</b> = Decline (не викупили посилку) ÷ заявки — пізній статус, свіжий місяць занижує. <b>Продано</b> = статус SOLD ÷ заявки. Числа прямо з SalesDrive. Оновлення раз на день автоматично; «Повторні/ретеншн» додам окремо (треба прохід по історії покупців).</p>
+<p><a href="/kpirefresh?key={AK}" style="display:inline-block;background:#C94F72;color:#fff;padding:7px 16px;border-radius:8px;font-size:13px">↻ Оновити з SalesDrive</a> <span style=color:#A1939A;font-size:12px>займає ~5 хв (ліміти SalesDrive)</span></p></section>
 </div></html>"""
 
 def _nav(active, AK):
