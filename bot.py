@@ -414,6 +414,8 @@ STORE_ARG = {"mamulya": "Mamulya.lviv", "modnamama": "Modnamama", "znana": "Znan
 SOLD_F = "status not in (6,7,13,15,8)"
 ALLOWED_HOSTS = ("mamulya.lviv.ua", "modnamama.ua", "znanamama.com.ua", "antiagecosmetics.com.ua", "lipoland.fun")
 BASE_URL = os.environ.get("BASE_URL", "https://mamulya-bot.onrender.com").rstrip("/")
+# клієнтський редирект кліків: Cloudflare Worker (завжди онлайн), fallback — /r самого бота
+CLICK_BASE = os.environ.get("CLICK_BASE", "").rstrip("/") or (BASE_URL + "/r")
 
 def add_utm(url, seg):
     # обовʼязкові UTM, щоб SalesDrive бачила замовлення як кампанію «Telegram Bot»
@@ -424,10 +426,10 @@ def add_utm(url, seg):
     return f"{url}{sep}utm_source=telegram&utm_medium=bot&utm_campaign={seg or 'post'}"
 
 def track_url(url, pid, cid, seg):
-    # UTM + редирект через бота (для кліків/CTR у кабінеті)
+    # UTM + редирект через Worker (CLICK_BASE) або /r бота; клієнтський лінк не залежить від рестартів бота
     url = add_utm(url, seg)
-    if not url.startswith("http") or not BASE_URL: return url
-    return f"{BASE_URL}/r?p={pid}&c={cid}&u={urllib.parse.quote(url, safe='')}"
+    if not url.startswith("http"): return url
+    return f"{CLICK_BASE}?p={pid}&c={cid}&u={urllib.parse.quote(url, safe='')}"
 
 def parse_button(body):
     img = None
@@ -1230,6 +1232,10 @@ class Hook(BaseHTTPRequestHandler):
             try: DB.execute("insert into clicks values(?,?,?)", (pid, cid, time.time())); DB.commit()
             except Exception as e: print("click", e)
             self.send_response(302); self.send_header("Location", target); self.end_headers(); return
+        if u.path == "/clicklog":  # публічний: Worker логить клік (без редиректу)
+            try: DB.execute("insert into clicks values(?,?,?)", (int(qs.get("p", ["0"])[0] or 0), int(qs.get("c", ["0"])[0] or 0), time.time())); DB.commit()
+            except Exception as e: print("clicklog", e)
+            self.send_response(204); self.end_headers(); return
         if u.path == "/clicksclean" and authed:  # прибрати синтетичні тест-кліки
             nd = DB.execute("delete from clicks where chat_id in (0, 88888)").rowcount
             DB.commit()
@@ -1390,7 +1396,7 @@ class Hook(BaseHTTPRequestHandler):
             self.wfile.write(posts_page().encode()); return
         if u.path == "/kpi" and authed:
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
-            self.wfile.write(kpi_page().encode()); return
+            self.wfile.write(kpi_page(qs.get("store", [None])[0]).encode()); return
         if u.path == "/sched" and authed:
             sid = int(qs.get("id", ["0"])[0])
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
@@ -1676,47 +1682,54 @@ details.p[open] summary{margin-bottom:8px}
 .nav{display:flex;gap:6px;margin:0 auto 14px;max-width:1100px}.nav a{padding:6px 14px;border-radius:8px;font-size:13px;font-weight:600;color:#6E5F65;background:#fff;border:1px solid #EADFDB}.nav a.on{background:#B8325A;color:#fff;border-color:#B8325A}
 </style>"""
 
-def kpi_page():
+def kpi_page(store=None):
     AK = os.environ.get("ADMIN_KEY", "")
-    STORE = "Mamulya.lviv"
-    rows = DB.execute("select phone, ts, amount, status from orders where store=? and coalesce(phone,'')!='' and status!=15", (STORE,)).fetchall()
+    all_stores = [r[0] for r in DB.execute("select store, count(*) c from orders where coalesce(store,'')!='' and status!=15 group by store having c>=50 order by c desc")]
+    STORE = store if store in all_stores else (all_stores[0] if all_stores else "Mamulya.lviv")
+    sw = "".join(f'<a class="{"on" if s==STORE else ""}" href="/kpi?key={AK}&store={urllib.parse.quote(s)}">{s}</a>' for s in all_stores)
+    rows = DB.execute("select phone, ts, amount, status from orders where store=? and coalesce(phone,'')!='' and status not in (15,8)", (STORE,)).fetchall()
     mon = lambda t: time.strftime("%Y-%m", time.localtime(t))
-    CANCEL = {6, 13}            # відмова + скасовано
-    CONF = lambda s: s not in (6, 7, 13, 15, 8)   # підтверджене (не скасоване/спам/тест/видалене/повернення)
+    CONF = lambda s: s not in (6, 7, 13, 15, 8)   # підтверджене (не скасоване/відмова/спам/тест/видалене/повернення)
     first_conf = {}            # телефон -> ts першого підтвердженого замовлення
     for ph, ts, amt, st in sorted(rows, key=lambda r: r[1]):
         if CONF(st) and ph not in first_conf: first_conf[ph] = ts
     from collections import defaultdict
-    M = defaultdict(lambda: {"zay": 0, "canc": 0, "buyers": set(), "ret": set()})
+    M = defaultdict(lambda: {"zay": 0, "canc": 0, "decl": 0, "buyers": set(), "ret": set()})
     for ph, ts, amt, st in rows:
-        m = mon(ts); d = M[m]
+        m = mon(ts)
+        if m < "2026-09": continue   # рахунок з вересня
+        d = M[m]
         d["zay"] += 1
-        if st in CANCEL: d["canc"] += 1
+        if st == 13: d["canc"] += 1   # Скасований (до відправки)
+        if st == 6: d["decl"] += 1    # Decline — відмова від посилки
         if CONF(st):
             d["buyers"].add(ph)
             mstart = time.mktime(time.strptime(m + "-01", "%Y-%m-%d"))
             if first_conf.get(ph, ts) < mstart: d["ret"].add(ph)
     out = ""
+    UA_MON = ["", "січень", "лютий", "березень", "квітень", "травень", "червень", "липень", "серпень", "вересень", "жовтень", "листопад", "грудень"]
     for m in sorted(M, reverse=True):
         d = M[m]
         cancp = d["canc"] / d["zay"] * 100 if d["zay"] else 0
+        declp = d["decl"] / d["zay"] * 100 if d["zay"] else 0
         retp = len(d["ret"]) / len(d["buyers"]) * 100 if d["buyers"] else 0
-        UA_MON = ["", "січень", "лютий", "березень", "квітень", "травень", "червень", "липень", "серпень", "вересень", "жовтень", "листопад", "грудень"]
         y, mm = m.split("-"); nm = f"{UA_MON[int(mm)]} {y}"
         cc = "#B8325A" if cancp > 18 else "#2E8B57"
         rc = "#2E8B57" if retp >= 15 else "#B8325A"
         out += (f"<tr><td>{nm}</td><td class=n>{d['zay']}</td>"
                 f"<td class=n style=color:{cc}><b>{cancp:.1f}%</b></td><td class=n style=color:#A1939A>{d['canc']}</td>"
+                f"<td class=n style=color:#A86A1F><b>{declp:.1f}%</b></td><td class=n style=color:#A1939A>{d['decl']}</td>"
                 f"<td class=n style=color:{rc}><b>{retp:.1f}%</b></td><td class=n style=color:#A1939A>{len(d['ret'])}/{len(d['buyers'])}</td></tr>")
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>KPI — Mamulya</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
+<title>KPI — {STORE}</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
 {CAB_CSS}
-<div class=top><h1>📈 KPI Mamulya · по місяцях</h1><span class=upd>оновлено {time.strftime("%d.%m %H:%M")}</span></div>
+<div class=top><h1>📈 KPI · по місяцях</h1><span class=upd>оновлено {time.strftime("%d.%m %H:%M")}</span></div>
 {_nav("KPI", AK)}
-<section class="p wide"><h2>Ретеншн і скасування <small>з бази замовлень бота (Mamulya.lviv, з 10.09) · ціль: скасування ≤18%, ретеншн ≥15%</small></h2>
-<table><tr><th>Місяць</th><th>Заявки</th><th>Скасування</th><th>шт</th><th>Повторні</th><th>×/усіх</th></tr>{out or '<tr><td>нема даних</td></tr>'}</table>
-<p style=color:#A1939A;font-size:12px><b>Скасування</b> = відмова+скасовано ÷ усі заявки місяця. <b>Повторні</b> = покупці місяця, що вже мали підтверджене замовлення раніше, ÷ усі покупці місяця. Рахується лише з даних бота (з 10.09), тож ранні місяці занижують «повторні» — повна історія лише в SalesDrive. Для стабільного тренду дивись від місяця з повним обсягом.</p></section>
+<div class=nav style=margin-top:-6px>{sw}</div>
+<section class="p wide"><h2>Ретеншн і скасування <small>{STORE} · з бази замовлень бота · ціль: скасування ≤18%, ретеншн ≥15%</small></h2>
+<table><tr><th>Місяць</th><th>Заявки</th><th>Скасовано</th><th>шт</th><th>Відмова</th><th>шт</th><th>Повторні</th><th>×/усіх</th></tr>{out or '<tr><td>нема даних</td></tr>'}</table>
+<p style=color:#A1939A;font-size:12px><b>Скасовано</b> = статус «Скасований» (до відправки) ÷ усі заявки місяця (ціль ≤18%). <b>Відмова</b> = статус Decline (відмова від посилки) ÷ усі заявки. <b>Повторні</b> = покупці місяця, що вже мали підтверджене замовлення раніше, ÷ усі покупці місяця. Рахунок з вересня; «повторні» в ранніх місяцях занижені (повна історія лише в SalesDrive).</p></section>
 </div></html>"""
 
 def _nav(active, AK):
