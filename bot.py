@@ -1485,6 +1485,22 @@ td,th{{padding:7px 12px;border-bottom:1px solid #E8DCD8;text-align:left;vertical
 <table><tr><th>Дата</th><th>Повідомлення</th></tr>{"".join(tr(r) for r in plan) or tr(("—","для цієї стадії все надіслано"))}</table>
 <p style="color:#A1939A">Плюс службові: нагадування про купон за 5 днів до кінця дії (якщо є активний купон).</p>"""
 
+def attrib_orders():
+    # last-click атрибуція: замовлення → тій розсилці, чию кнопку клієнт клікнув останньою перед покупкою (вікно 7 днів)
+    from collections import defaultdict
+    now = time.time()
+    byphone = defaultdict(list)
+    for pid, cts, ph in DB.execute("select cl.pid, cl.ts, c.phone from clicks cl join customers c on c.chat_id=cl.chat_id where coalesce(c.phone,'')!=''"):
+        byphone[ph].append((cts, pid))
+    res = defaultdict(list)
+    for amt, items, ots, phone, store in DB.execute(f"select amount, items, ts, phone, coalesce(store,'') from orders where {SOLD_F} and coalesce(phone,'')!='' and ts > ?", (now - 45 * 86400,)):
+        cand = [(cts, pid) for cts, pid in byphone.get(phone, []) if ots - 7 * 86400 <= cts <= ots]
+        if cand:
+            _, pid = max(cand)
+            nm = (DB.execute("select name from names where phone=?", (phone,)).fetchone() or [""])[0]
+            res[pid].append((amt or 0, items, ots, phone, nm, store))
+    return res
+
 def posts_page():
     AK = os.environ.get("ADMIN_KEY", "")
     q = lambda sql, *a: DB.execute(sql, a).fetchall()
@@ -1494,16 +1510,13 @@ def posts_page():
               "pregnant": "вагітність", "m0_3": "0–3 міс", "m3_6": "3–6 міс", "m6_12": "6–12 міс", "lipoland": "Lipoland",
               "Mamulya.lviv": "Mamulya", "Modnamama": "Modnamama", "Znana Mama": "Znana", "всі": "усім"}
     posts = q("select id, ts, target, text from posts order by ts desc limit 50")
+    AT = attrib_orders()  # last-click атрибуція
     rows = ""
     tot_deliv = tot_ord = tot_rev = 0
     for pid, ts, target, text in posts:
         deliv = n("select count(*) from sent where key=?", f"post:{pid}")
-        # замовлення отримувачів протягом 7 днів після розсилки (атрибуція)
-        att = q(f"""select count(*), coalesce(sum(o.amount),0) from orders o
-            where o.{SOLD} and o.ts between ? and ?+7*86400
-            and o.phone in (select c.phone from customers c join sent s on s.chat_id=c.chat_id where s.key=? and c.phone!='')""",
-            ts, ts, f"post:{pid}")
-        orders, rev = att[0] if att else (0, 0)
+        lst = AT.get(pid, [])
+        orders = len(lst); rev = sum(a[0] for a in lst)
         clk = n("select count(distinct chat_id) from clicks where pid=?", pid)
         ctr = f"{clk/deliv*100:.0f}%" if deliv else "—"
         tot_deliv += deliv; tot_ord += orders; tot_rev += rev
@@ -1512,12 +1525,11 @@ def posts_page():
         ord_cell = f"<a href='/border?key={AK}&id={pid}'>{orders}</a>" if orders else "0"
         rows += f"<tr><td>{when}</td><td>{SEG_UA.get(target, target)}</td><td class=n>{deliv}</td><td class=n>{clk}</td><td class=n>{ctr}</td><td class=n>{ord_cell}</td><td class=n>{conv}</td><td class=n>{rev:,.0f}".replace(",", " ") + f"</td><td style=max-width:240px;white-space:normal;color:#6E5F65>{text[:80]}</td></tr>"
     # розріз по магазинах: замовлення отримувачів усіх розсилок, 7 днів, по магазину
-    by_store = q(f"""select o.store, count(*), coalesce(sum(o.amount),0) from orders o
-        join sent s on s.key like 'post:%'
-        join customers c on c.chat_id=s.chat_id and c.phone=o.phone
-        where o.{SOLD} and o.ts between s.ts and s.ts+7*86400 and o.store!=''
-        group by o.store order by 3 desc""")
-    store_rows = "".join(f"<tr><td>{st}</td><td class=n>{c}</td><td class=n>{r:,.0f}".replace(",", " ") + "</td></tr>" for st, c, r in by_store) or "<tr><td>поки нема</td></tr>"
+    bs = {}
+    for lst in AT.values():
+        for amt, items, ots, phone, nm, store in lst:
+            if store: bs.setdefault(store, [0, 0]); bs[store][0] += 1; bs[store][1] += amt
+    store_rows = "".join(f"<tr><td>{st}</td><td class=n>{c}</td><td class=n>{r:,.0f}".replace(",", " ") + "</td></tr>" for st, (c, r) in sorted(bs.items(), key=lambda x: -x[1][1])) or "<tr><td>поки нема</td></tr>"
     sched = q("select id, run_ts, seg, body, btn, done, sent, total from scheduled order by done, run_ts")
     sched_rows = ""
     for sid, rts, seg, body, btn, done, snt, tot in sched:
@@ -1549,20 +1561,14 @@ def posts_page():
 
 def border_page(pid):
     AK = os.environ.get("ADMIN_KEY", "")
-    SOLD = "status not in (6,7,13,15,8)"
     p = DB.execute("select ts, target from posts where id=?", (pid,)).fetchone()
     if not p: return "<p>Розсилку не знайдено</p>"
     ts, target = p
     when = time.strftime("%d.%m %H:%M", time.localtime(ts))
-    ords = DB.execute(f"""select o.amount, o.items, o.ts, o.phone,
-        (select name from names where phone=o.phone)
-        from orders o
-        where o.{SOLD} and o.ts between ? and ?+7*86400
-        and o.phone in (select c.phone from customers c join sent s on s.chat_id=c.chat_id where s.key=? and c.phone!='')
-        order by o.ts desc""", (ts, ts, f"post:{pid}")).fetchall()
+    ords = sorted(attrib_orders().get(pid, []), key=lambda r: r[2], reverse=True)
     rows = ""
     tot = 0
-    for amt, items, ots, phone, nm in ords:
+    for amt, items, ots, phone, nm, store in ords:
         tot += amt or 0
         try: prod = " · ".join(json.loads(items)[:3]) or "—"
         except Exception: prod = "—"
@@ -1577,7 +1583,7 @@ def border_page(pid):
 <p><a href="/posts?key={AK}">← до розсилок</a></p>
 <section class="p wide"><h2>Замовлення отримувачів <small>протягом 7 днів після розсилки · {len(ords)} шт · {("%.0f" % tot).replace(",", " ")} грн</small></h2>
 <table><tr><th>Сума</th><th>Товар</th><th>Коли</th><th>Клієнт</th></tr>{rows or '<tr><td>поки нема</td></tr>'}</table>
-<p style=color:#A1939A;font-size:12px>Атрибуція: клієнт отримав цю розсилку й зробив замовлення протягом 7 днів. Те саме замовлення може зараховуватись кільком розсилкам, якщо людина була в обох.</p></section>
+<p style=color:#A1939A;font-size:12px>Атрибуція за <b>останнім кліком</b>: замовлення зараховане цій розсилці, бо клієнт натиснув саме її кнопку останньою перед покупкою (вікно 7 днів). Хто не клікав — не зараховується нікому.</p></section>
 </div></html>"""
 
 def sched_page(sid):
