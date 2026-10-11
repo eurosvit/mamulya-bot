@@ -1388,6 +1388,9 @@ class Hook(BaseHTTPRequestHandler):
         if u.path == "/posts" and authed:
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
             self.wfile.write(posts_page().encode()); return
+        if u.path == "/kpi" and authed:
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
+            self.wfile.write(kpi_page().encode()); return
         if u.path == "/sched" and authed:
             sid = int(qs.get("id", ["0"])[0])
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
@@ -1673,8 +1676,51 @@ details.p[open] summary{margin-bottom:8px}
 .nav{display:flex;gap:6px;margin:0 auto 14px;max-width:1100px}.nav a{padding:6px 14px;border-radius:8px;font-size:13px;font-weight:600;color:#6E5F65;background:#fff;border:1px solid #EADFDB}.nav a.on{background:#B8325A;color:#fff;border-color:#B8325A}
 </style>"""
 
+def kpi_page():
+    AK = os.environ.get("ADMIN_KEY", "")
+    STORE = "Mamulya.lviv"
+    rows = DB.execute("select phone, ts, amount, status from orders where store=? and coalesce(phone,'')!='' and status!=15", (STORE,)).fetchall()
+    mon = lambda t: time.strftime("%Y-%m", time.localtime(t))
+    CANCEL = {6, 13}            # відмова + скасовано
+    CONF = lambda s: s not in (6, 7, 13, 15, 8)   # підтверджене (не скасоване/спам/тест/видалене/повернення)
+    first_conf = {}            # телефон -> ts першого підтвердженого замовлення
+    for ph, ts, amt, st in sorted(rows, key=lambda r: r[1]):
+        if CONF(st) and ph not in first_conf: first_conf[ph] = ts
+    from collections import defaultdict
+    M = defaultdict(lambda: {"zay": 0, "canc": 0, "buyers": set(), "ret": set()})
+    for ph, ts, amt, st in rows:
+        m = mon(ts); d = M[m]
+        d["zay"] += 1
+        if st in CANCEL: d["canc"] += 1
+        if CONF(st):
+            d["buyers"].add(ph)
+            mstart = time.mktime(time.strptime(m + "-01", "%Y-%m-%d"))
+            if first_conf.get(ph, ts) < mstart: d["ret"].add(ph)
+    out = ""
+    for m in sorted(M, reverse=True):
+        d = M[m]
+        cancp = d["canc"] / d["zay"] * 100 if d["zay"] else 0
+        retp = len(d["ret"]) / len(d["buyers"]) * 100 if d["buyers"] else 0
+        UA_MON = ["", "січень", "лютий", "березень", "квітень", "травень", "червень", "липень", "серпень", "вересень", "жовтень", "листопад", "грудень"]
+        y, mm = m.split("-"); nm = f"{UA_MON[int(mm)]} {y}"
+        cc = "#B8325A" if cancp > 18 else "#2E8B57"
+        rc = "#2E8B57" if retp >= 15 else "#B8325A"
+        out += (f"<tr><td>{nm}</td><td class=n>{d['zay']}</td>"
+                f"<td class=n style=color:{cc}><b>{cancp:.1f}%</b></td><td class=n style=color:#A1939A>{d['canc']}</td>"
+                f"<td class=n style=color:{rc}><b>{retp:.1f}%</b></td><td class=n style=color:#A1939A>{len(d['ret'])}/{len(d['buyers'])}</td></tr>")
+    return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>KPI — Mamulya</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
+{CAB_CSS}
+<div class=top><h1>📈 KPI Mamulya · по місяцях</h1><span class=upd>оновлено {time.strftime("%d.%m %H:%M")}</span></div>
+{_nav("KPI", AK)}
+<section class="p wide"><h2>Ретеншн і скасування <small>з бази замовлень бота (Mamulya.lviv, з 10.09) · ціль: скасування ≤18%, ретеншн ≥15%</small></h2>
+<table><tr><th>Місяць</th><th>Заявки</th><th>Скасування</th><th>шт</th><th>Повторні</th><th>×/усіх</th></tr>{out or '<tr><td>нема даних</td></tr>'}</table>
+<p style=color:#A1939A;font-size:12px><b>Скасування</b> = відмова+скасовано ÷ усі заявки місяця. <b>Повторні</b> = покупці місяця, що вже мали підтверджене замовлення раніше, ÷ усі покупці місяця. Рахується лише з даних бота (з 10.09), тож ранні місяці занижують «повторні» — повна історія лише в SalesDrive. Для стабільного тренду дивись від місяця з повним обсягом.</p></section>
+</div></html>"""
+
 def _nav(active, AK):
-    tabs = [("Огляд", f"/admin?key={AK}"), ("Розсилки", f"/posts?key={AK}")]
+    tabs = [("Огляд", f"/admin?key={AK}"), ("Розсилки", f"/posts?key={AK}"), ("KPI", f"/kpi?key={AK}")]
     return '<div class=nav>' + "".join(f'<a class="{"on" if active==lbl else ""}" href="{url}">{lbl}</a>' for lbl, url in tabs) + '</div>'
 
 def admin_page():
