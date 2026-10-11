@@ -841,77 +841,65 @@ def poll():
 KPI_STORES = [("Mamulya", [94, 97]), ("Modnamama", [120, 150]), ("Znana Mama", [164]), ("Lipoland", [170]), ("AntiAge", [22])]
 
 def sd_get(qs):
-    # запит до SalesDrive order/list із ретраєм на 400 (= ліміт)
+    # запит до SalesDrive order/list; на ліміт 10/хв чекаємо 65с, на ліміт 100/год — одразу падаємо (чекати марно)
     url = "https://aleyana.salesdrive.me/api/order/list/" + qs.replace(" ", "%20")
     for attempt in range(4):
         try:
             return json.load(urllib.request.urlopen(urllib.request.Request(url, headers={"Form-Api-Key": os.environ["SALESDRIVE_KEY"]}), timeout=40))
         except urllib.error.HTTPError as e:
-            if e.code != 400 or attempt == 3: raise
-            time.sleep(65)
+            msg = e.read().decode("utf-8", "ignore") if e.code == 400 else ""
+            if e.code == 400 and "1 minute" in msg and attempt < 3:
+                time.sleep(65); continue
+            raise
 
 def sd_count(qs):
     return (sd_get(qs).get("totals") or {}).get("count", 0)
 
-def pull_retention(sajts):
-    # тягне підтверджені замовлення (телефон, місяць) по всій історії → buyers_by_month, first_month
-    from collections import defaultdict
+def pull_all(sajts, max_pages=80):
+    # один прохід по всій історії магазину: (phone, 'YYYY-MM', statusId) для кожного замовлення
     sj = "".join(f"&filter[sajt][]={s}" for s in sajts)
-    bym = defaultdict(set); first = {}
+    out = []
     page = 1
-    while True:
-        r = sd_get(f"?page={page}&limit=100&sort=id{sj}")
+    while page <= max_pages:
+        r = sd_get(f"?page={page}&limit=100{sj}")
         data = r.get("data") or []
         for o in data:
-            if int(o.get("statusId") or 0) in (6, 7, 13, 15, 8): continue  # лише реальні/підтверджені
             c0 = (o.get("contacts") or [{}])[0] if isinstance(o.get("contacts"), list) else {}
             ph = norm_phone((c0.get("phone") or [""])[0] if c0 else "")
-            ot = str(o.get("orderTime") or "")[:7]  # YYYY-MM
-            if not ph or len(ot) != 7: continue
-            bym[ot].add(ph)
-            if ph not in first or ot < first[ph]: first[ph] = ot
+            ym = str(o.get("orderTime") or "")[:7]
+            if len(ym) == 7:
+                out.append((ph, ym, int(o.get("statusId") or 0)))
         if len(data) < 100: break
         page += 1; time.sleep(7)
-    return bym, first
+    return out
 
 def kpi_refresh():
+    # один прохід по магазину (вкладаємось у 100 запитів/год SalesDrive): усе рахуємо локально
     if not os.environ.get("SALESDRIVE_KEY"): return
-    import calendar
-    now = time.localtime()
-    months = []
-    y, m = 2026, 9
-    while (y, m) <= (now.tm_year, now.tm_mon):
-        months.append((y, m)); m += 1
-        if m > 12: m = 1; y += 1
+    from collections import defaultdict
     for store, sajts in KPI_STORES:
-        sj = "".join(f"&filter[sajt][]={s}" for s in sajts)
-        for (y, m) in months:
-            last = calendar.monthrange(y, m)[1]
-            base = f"?filter[orderTime][from]={y:04d}-{m:02d}-01 00:00:00&filter[orderTime][to]={y:04d}-{m:02d}-{last:02d} 23:59:59{sj}&page=1&limit=1"
-            try:
-                allc = sd_count(base) or 0; time.sleep(7)
-                test = sd_count(base + "&filter[statusId]=15") or 0; time.sleep(7)
-                dele = sd_count(base + "&filter[statusId]=8") or 0; time.sleep(7)
-                canc = sd_count(base + "&filter[statusId]=13") or 0; time.sleep(7)
-                decl = sd_count(base + "&filter[statusId]=6") or 0; time.sleep(7)
-                sold = sd_count(base + "&filter[statusId]=5") or 0; time.sleep(7)
-                zay = allc - test - dele   # чиста база: без тесту(15) і видалених(8, часто спам/дублі)
-                DB.execute("insert into kpi_cache(store,ym,zay,canc,decl,sold,updated) values(?,?,?,?,?,?,?) on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated",
-                           (store, f"{y:04d}-{m:02d}", zay, canc, decl, sold, time.time()))
-                DB.commit()
-            except Exception as e:
-                print("kpi_refresh", store, y, m, e)
-        # ретеншн: повторні покупці по місяцях (окремий прохід по історії)
         try:
-            bym, first = pull_retention(sajts)
-            for (y, m) in months:
-                ym = f"{y:04d}-{m:02d}"
-                B = bym.get(ym, set())
-                R = {p for p in B if first.get(p, "9999") < ym}
-                DB.execute("update kpi_cache set ret_num=?, ret_den=? where store=? and ym=?", (len(R), len(B), store, ym))
-            DB.commit()
+            orders = pull_all(sajts)
         except Exception as e:
-            print("kpi_ret", store, e)
+            print("kpi_pull", store, e); continue
+        M = defaultdict(lambda: {"zay": 0, "canc": 0, "decl": 0, "sold": 0})
+        bym = defaultdict(set); first = {}
+        for ph, ym, st in orders:
+            if st not in (15, 8):           # чисті заявки (без тесту/видалених)
+                d = M[ym]; d["zay"] += 1
+                if st == 13: d["canc"] += 1
+                if st == 6: d["decl"] += 1
+                if st == 5: d["sold"] += 1
+            if ph and st not in (6, 7, 13, 15, 8):  # підтверджене → ретеншн
+                bym[ym].add(ph)
+                if ph not in first or ym < first[ph]: first[ph] = ym
+        for ym, d in M.items():
+            if ym < "2026-09": continue
+            B = bym.get(ym, set()); R = {p for p in B if first.get(p, "9999") < ym}
+            DB.execute("insert into kpi_cache(store,ym,zay,canc,decl,sold,updated,ret_num,ret_den) values(?,?,?,?,?,?,?,?,?) "
+                       "on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated,ret_num=excluded.ret_num,ret_den=excluded.ret_den",
+                       (store, ym, d["zay"], d["canc"], d["decl"], d["sold"], time.time(), len(R), len(B)))
+        DB.commit()
     print("kpi_refresh done")
 
 def sync_orders(pages, limit=50):
