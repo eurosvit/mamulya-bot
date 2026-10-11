@@ -1392,6 +1392,9 @@ class Hook(BaseHTTPRequestHandler):
             sid = int(qs.get("id", ["0"])[0])
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
             self.wfile.write(sched_page(sid).encode()); return
+        if u.path == "/border" and authed:
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
+            self.wfile.write(border_page(int(qs.get("id", ["0"])[0])).encode()); return
         if u.path == "/schedx" and authed:
             sid = int(qs.get("id", ["0"])[0]); cid = int(qs.get("cid", ["0"])[0])
             if DB.execute("select 1 from sched_excl where sid=? and chat_id=?", (sid, cid)).fetchone():
@@ -1506,7 +1509,8 @@ def posts_page():
         tot_deliv += deliv; tot_ord += orders; tot_rev += rev
         when = time.strftime("%d.%m %H:%M", time.localtime(ts))
         conv = f"{orders/deliv*100:.0f}%" if deliv else "—"
-        rows += f"<tr><td>{when}</td><td>{SEG_UA.get(target, target)}</td><td class=n>{deliv}</td><td class=n>{clk}</td><td class=n>{ctr}</td><td class=n>{orders}</td><td class=n>{conv}</td><td class=n>{rev:,.0f}".replace(",", " ") + f"</td><td style=max-width:240px;white-space:normal;color:#6E5F65>{text[:80]}</td></tr>"
+        ord_cell = f"<a href='/border?key={AK}&id={pid}'>{orders}</a>" if orders else "0"
+        rows += f"<tr><td>{when}</td><td>{SEG_UA.get(target, target)}</td><td class=n>{deliv}</td><td class=n>{clk}</td><td class=n>{ctr}</td><td class=n>{ord_cell}</td><td class=n>{conv}</td><td class=n>{rev:,.0f}".replace(",", " ") + f"</td><td style=max-width:240px;white-space:normal;color:#6E5F65>{text[:80]}</td></tr>"
     # розріз по магазинах: замовлення отримувачів усіх розсилок, 7 днів, по магазину
     by_store = q(f"""select o.store, count(*), coalesce(sum(o.amount),0) from orders o
         join sent s on s.key like 'post:%'
@@ -1541,6 +1545,39 @@ def posts_page():
 <table><tr><th>Магазин</th><th>Замовлень</th><th>Оборот</th></tr>{store_rows}</table></section>
 <section class="p wide"><h2>Заплановані <small>бот надішле сам у вказаний час · керування: <code>/schedule</code> у боті</small></h2>
 <table><tr><th>ID</th><th>Коли</th><th>Сегмент</th><th>Статус</th><th>Отримувачі</th><th>Текст</th></tr>{sched_rows or '<tr><td>нема запланованих — додайте <code>/schedule ДД.ММ ГГ:ХХ сегмент текст</code></td></tr>'}</table></section>
+</div></html>"""
+
+def border_page(pid):
+    AK = os.environ.get("ADMIN_KEY", "")
+    SOLD = "status not in (6,7,13,15,8)"
+    p = DB.execute("select ts, target from posts where id=?", (pid,)).fetchone()
+    if not p: return "<p>Розсилку не знайдено</p>"
+    ts, target = p
+    when = time.strftime("%d.%m %H:%M", time.localtime(ts))
+    ords = DB.execute(f"""select o.amount, o.items, o.ts, o.phone,
+        (select name from names where phone=o.phone)
+        from orders o
+        where o.{SOLD} and o.ts between ? and ?+7*86400
+        and o.phone in (select c.phone from customers c join sent s on s.chat_id=c.chat_id where s.key=? and c.phone!='')
+        order by o.ts desc""", (ts, ts, f"post:{pid}")).fetchall()
+    rows = ""
+    tot = 0
+    for amt, items, ots, phone, nm in ords:
+        tot += amt or 0
+        try: prod = " · ".join(json.loads(items)[:3]) or "—"
+        except Exception: prod = "—"
+        rows += (f"<tr><td class=n><b>{amt:,.0f} грн</b></td>".replace(",", " ")
+                 + f"<td>{prod[:120]}</td><td style=color:#6E5F65;white-space:nowrap>{time.strftime('%d.%m %H:%M', time.localtime(ots))}</td>"
+                 + f"<td style=color:#6E5F65>{nm or '—'}</td></tr>")
+    return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Замовлення #{pid}</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
+{CAB_CSS}
+<div class=top><h1>🛒 Замовлення після розсилки</h1><span class=upd>{when} · {SEG_UA_G.get(target, target)}</span></div>
+<p><a href="/posts?key={AK}">← до розсилок</a></p>
+<section class="p wide"><h2>Замовлення отримувачів <small>протягом 7 днів після розсилки · {len(ords)} шт · {("%.0f" % tot).replace(",", " ")} грн</small></h2>
+<table><tr><th>Сума</th><th>Товар</th><th>Коли</th><th>Клієнт</th></tr>{rows or '<tr><td>поки нема</td></tr>'}</table>
+<p style=color:#A1939A;font-size:12px>Атрибуція: клієнт отримав цю розсилку й зробив замовлення протягом 7 днів. Те саме замовлення може зараховуватись кільком розсилкам, якщо людина була в обох.</p></section>
 </div></html>"""
 
 def sched_page(sid):
