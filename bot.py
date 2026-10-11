@@ -866,9 +866,9 @@ def pull_all(sajts, max_pages=80):
         for o in data:
             c0 = (o.get("contacts") or [{}])[0] if isinstance(o.get("contacts"), list) else {}
             ph = norm_phone((c0.get("phone") or [""])[0] if c0 else "")
-            ym = str(o.get("orderTime") or "")[:7]
-            if len(ym) == 7:
-                out.append((ph, ym, int(o.get("statusId") or 0)))
+            ot = str(o.get("orderTime") or "")[:19]  # повний час для порівняння «перше/повторне»
+            if len(ot) >= 7:
+                out.append((ph, ot, int(o.get("statusId") or 0)))
         if len(data) < 100: break
         page += 1; time.sleep(7)
     return out
@@ -883,19 +883,25 @@ def kpi_refresh():
         except Exception as e:
             print("kpi_pull", store, e); continue
         M = defaultdict(lambda: {"zay": 0, "canc": 0, "decl": 0, "sold": 0})
-        bym = defaultdict(set); first = {}
-        for ph, ym, st in orders:
+        # перше підтверджене замовлення кожного телефону (за часом) — щоб відрізнити повторну покупку
+        first = {}
+        for ph, ot, st in orders:
+            if ph and st not in (6, 7, 13, 15, 8):
+                if ph not in first or ot < first[ph]: first[ph] = ot
+        buyers = defaultdict(set); repeat = defaultdict(set)
+        for ph, ot, st in orders:
+            ym = ot[:7]
             if st not in (15, 8):           # чисті заявки (без тесту/видалених)
                 d = M[ym]; d["zay"] += 1
                 if st == 13: d["canc"] += 1
                 if st == 6: d["decl"] += 1
                 if st == 5: d["sold"] += 1
-            if ph and st not in (6, 7, 13, 15, 8):  # підтверджене → ретеншн
-                bym[ym].add(ph)
-                if ph not in first or ym < first[ph]: first[ph] = ym
+            if ph and st not in (6, 7, 13, 15, 8):   # підтверджене
+                buyers[ym].add(ph)
+                if ot > first[ph]: repeat[ym].add(ph)   # не перша покупка клієнта → повторний
         for ym, d in M.items():
             if ym < "2026-09": continue
-            B = bym.get(ym, set()); R = {p for p in B if first.get(p, "9999") < ym}
+            B = buyers.get(ym, set()); R = repeat.get(ym, set())
             DB.execute("insert into kpi_cache(store,ym,zay,canc,decl,sold,updated,ret_num,ret_den) values(?,?,?,?,?,?,?,?,?) "
                        "on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated,ret_num=excluded.ret_num,ret_den=excluded.ret_den",
                        (store, ym, d["zay"], d["canc"], d["decl"], d["sold"], time.time(), len(R), len(B)))
@@ -1810,7 +1816,7 @@ def kpi_page(store=None):
 <li><b>Скасовано</b> — статус «Скасований» до відправки ÷ заявки. Ціль <b>≤18%</b> (зелений = у нормі).</li>
 <li><b>Відмова</b> — Decline, не викупили посилку. Пізній статус — свіжий місяць занижує.</li>
 <li><b>Продано</b> — статус SOLD ÷ заявки.</li>
-<li><b>Повторні</b> — покупці місяця, що вже купували раніше ÷ усі покупці. Ціль <b>≥15%</b> (ранні місяці занижені — історія рахується лише з наявних даних).</li>
+<li><b>Повторні</b> — покупці місяця, для кого це <b>не перша покупка</b> (враховуючи й повтор у тому ж місяці) ÷ усі покупці. Ціль <b>≥15%</b>. Історія рахується з усіх даних SalesDrive.</li>
 </ul>
 <p style=margin:6px 0 0>Усе прямо з SalesDrive, кожне замовлення рахується раз.</p>
 </div>
