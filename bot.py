@@ -28,7 +28,7 @@ create table if not exists b2b(phone text primary key);
 create table if not exists scheduled(id integer primary key autoincrement, run_ts real, seg text, body text, btn text, done int default 0, sent int default 0, total int default 0, img text default '');
 create table if not exists sched_excl(sid int, chat_id int, primary key(sid, chat_id));
 create table if not exists clicks(pid int, chat_id int, ts real);
-create table if not exists kpi_cache(store text, ym text, zay int, canc int, decl int, sold int, updated real, primary key(store, ym));
+create table if not exists kpi_cache(store text, ym text, zay int, canc int, decl int, sold int, updated real, ret_num int default 0, ret_den int default 0, primary key(store, ym));
 """)
 try: DB.execute("alter table orders add column amount real default 0")
 except Exception: pass
@@ -45,6 +45,10 @@ except Exception: pass
 try: DB.execute("alter table orders add column status int default 0")
 except Exception: pass
 try: DB.execute("alter table customers add column src text default ''")
+except Exception: pass
+try: DB.execute("alter table kpi_cache add column ret_num int default 0")
+except Exception: pass
+try: DB.execute("alter table kpi_cache add column ret_den int default 0")
 except Exception: pass
 try: DB.execute("alter table scheduled add column img text default ''")
 except Exception: pass
@@ -836,16 +840,39 @@ def poll():
 # ---------- lifecycle cron ----------
 KPI_STORES = [("Mamulya", [94, 97]), ("Modnamama", [120, 150]), ("Znana Mama", [164]), ("Lipoland", [170]), ("AntiAge", [22])]
 
-def sd_count(qs):
-    # totals.count для фільтра SalesDrive (з ретраєм на 400 = ліміт)
+def sd_get(qs):
+    # запит до SalesDrive order/list із ретраєм на 400 (= ліміт)
     url = "https://aleyana.salesdrive.me/api/order/list/" + qs.replace(" ", "%20")
     for attempt in range(4):
         try:
-            r = json.load(urllib.request.urlopen(urllib.request.Request(url, headers={"Form-Api-Key": os.environ["SALESDRIVE_KEY"]}), timeout=40))
-            return (r.get("totals") or {}).get("count", 0)
+            return json.load(urllib.request.urlopen(urllib.request.Request(url, headers={"Form-Api-Key": os.environ["SALESDRIVE_KEY"]}), timeout=40))
         except urllib.error.HTTPError as e:
             if e.code != 400 or attempt == 3: raise
             time.sleep(65)
+
+def sd_count(qs):
+    return (sd_get(qs).get("totals") or {}).get("count", 0)
+
+def pull_retention(sajts):
+    # тягне підтверджені замовлення (телефон, місяць) по всій історії → buyers_by_month, first_month
+    from collections import defaultdict
+    sj = "".join(f"&filter[sajt][]={s}" for s in sajts)
+    bym = defaultdict(set); first = {}
+    page = 1
+    while True:
+        r = sd_get(f"?page={page}&limit=100&sort=id{sj}")
+        data = r.get("data") or []
+        for o in data:
+            if int(o.get("statusId") or 0) in (6, 7, 13, 15, 8): continue  # лише реальні/підтверджені
+            c0 = (o.get("contacts") or [{}])[0] if isinstance(o.get("contacts"), list) else {}
+            ph = norm_phone((c0.get("phone") or [""])[0] if c0 else "")
+            ot = str(o.get("orderTime") or "")[:7]  # YYYY-MM
+            if not ph or len(ot) != 7: continue
+            bym[ot].add(ph)
+            if ph not in first or ot < first[ph]: first[ph] = ot
+        if len(data) < 100: break
+        page += 1; time.sleep(7)
+    return bym, first
 
 def kpi_refresh():
     if not os.environ.get("SALESDRIVE_KEY"): return
@@ -869,10 +896,22 @@ def kpi_refresh():
                 decl = sd_count(base + "&filter[statusId]=6") or 0; time.sleep(7)
                 sold = sd_count(base + "&filter[statusId]=5") or 0; time.sleep(7)
                 zay = allc - test - dele   # чиста база: без тесту(15) і видалених(8, часто спам/дублі)
-                DB.execute("insert or replace into kpi_cache values(?,?,?,?,?,?,?)", (store, f"{y:04d}-{m:02d}", zay, canc, decl, sold, time.time()))
+                DB.execute("insert into kpi_cache(store,ym,zay,canc,decl,sold,updated) values(?,?,?,?,?,?,?) on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated",
+                           (store, f"{y:04d}-{m:02d}", zay, canc, decl, sold, time.time()))
                 DB.commit()
             except Exception as e:
                 print("kpi_refresh", store, y, m, e)
+        # ретеншн: повторні покупці по місяцях (окремий прохід по історії)
+        try:
+            bym, first = pull_retention(sajts)
+            for (y, m) in months:
+                ym = f"{y:04d}-{m:02d}"
+                B = bym.get(ym, set())
+                R = {p for p in B if first.get(p, "9999") < ym}
+                DB.execute("update kpi_cache set ret_num=?, ret_den=? where store=? and ym=?", (len(R), len(B), store, ym))
+            DB.commit()
+        except Exception as e:
+            print("kpi_ret", store, e)
     print("kpi_refresh done")
 
 def sync_orders(pages, limit=50):
@@ -1739,20 +1778,24 @@ def kpi_page(store=None):
     STORE = store if store in all_stores else all_stores[0]
     sw = "".join(f'<a class="{"on" if s==STORE else ""}" href="/kpi?key={AK}&store={urllib.parse.quote(s)}">{s}</a>' for s in all_stores)
     UA_MON = ["", "січень", "лютий", "березень", "квітень", "травень", "червень", "липень", "серпень", "вересень", "жовтень", "листопад", "грудень"]
-    rows = DB.execute("select ym, zay, canc, decl, sold, updated from kpi_cache where store=? order by ym desc", (STORE,)).fetchall()
+    rows = DB.execute("select ym, zay, canc, decl, sold, ret_num, ret_den from kpi_cache where store=? order by ym desc", (STORE,)).fetchall()
     upd = DB.execute("select max(updated) from kpi_cache").fetchone()[0]
     upd_s = time.strftime("%d.%m %H:%M", time.localtime(upd)) if upd else "—"
+    def cell(num, den, color, good=None, hi=None):
+        if not den: return "<td class=n style=color:#C9BDB8>—</td>"
+        p = num / den * 100
+        col = color
+        if hi is not None: col = "#2E8B57" if (p <= hi) else "#B8325A"
+        if good is not None: col = "#2E8B57" if (p >= good) else "#B8325A"
+        return f"<td class=n style=color:{col}><b>{p:.1f}%</b> <span style=color:#A1939A;font-weight:400>({num})</span></td>"
     out = ""
-    for ym, zay, canc, decl, sold, _ in rows:
-        cancp = canc / zay * 100 if zay else 0
-        declp = decl / zay * 100 if zay else 0
-        soldp = sold / zay * 100 if zay else 0
+    for ym, zay, canc, decl, sold, rn, rd in rows:
         y, mm = ym.split("-"); nm = f"{UA_MON[int(mm)]} {y}"
-        cc = "#B8325A" if cancp > 18 else "#2E8B57"
         out += (f"<tr><td>{nm}</td><td class=n>{zay}</td>"
-                f"<td class=n style=color:{cc}><b>{cancp:.1f}%</b></td><td class=n style=color:#A1939A>{canc}</td>"
-                f"<td class=n style=color:#A86A1F><b>{declp:.1f}%</b></td><td class=n style=color:#A1939A>{decl}</td>"
-                f"<td class=n style=color:#2E8B57><b>{soldp:.1f}%</b></td><td class=n style=color:#A1939A>{sold}</td></tr>")
+                + cell(canc, zay, "#B8325A", hi=18)
+                + cell(decl, zay, "#A86A1F")
+                + cell(sold, zay, "#2E8B57")
+                + cell(rn, rd, "#7C3AED", good=15) + "</tr>")
     empty = not rows
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>KPI — {STORE}</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
@@ -1761,10 +1804,10 @@ def kpi_page(store=None):
 <div class=top><h1>📈 KPI · по місяцях</h1><span class=upd>дані SalesDrive, оновлено {upd_s}</span></div>
 {_nav("KPI", AK)}
 <div class=nav style=margin-top:-6px>{sw}</div>
-<section class="p wide"><h2>Скасування і продажі <small>{STORE} · джерело SalesDrive · ціль: скасування ≤18%</small></h2>
-<table><tr><th>Місяць</th><th>Заявки</th><th>Скасовано</th><th>шт</th><th>Відмова</th><th>шт</th><th>Продано</th><th>шт</th></tr>{out or ('<tr><td>ще не завантажено — тисни «Оновити з SalesDrive»</td></tr>' if empty else '')}</table>
-<p style=color:#A1939A;font-size:12px><b>Заявки</b> = усі замовлення місяця <b>без тесту й видалених</b> (видалені = зазвичай спам/дублі). <b>Скасовано</b> = статус «Скасований» (до відправки) ÷ заявки (ціль ≤18%). <b>Відмова</b> = Decline (не викупили посилку) ÷ заявки — пізній статус, свіжий місяць занижує. <b>Продано</b> = SOLD ÷ заявки. Числа прямо з SalesDrive, кожне замовлення рахується раз. Оновлення раз на день автоматично; «Повторні/ретеншн» додам окремо (треба прохід по історії покупців).</p>
-<p><a href="/kpirefresh?key={AK}" style="display:inline-block;background:#C94F72;color:#fff;padding:7px 16px;border-radius:8px;font-size:13px">↻ Оновити з SalesDrive</a> <span style=color:#A1939A;font-size:12px>займає ~5 хв (ліміти SalesDrive)</span></p></section>
+<section class="p wide"><h2>KPI по місяцях <small>{STORE} · джерело SalesDrive · % і кількість у дужках</small></h2>
+<table><tr><th>Місяць</th><th>Заявки</th><th>Скасовано ≤18%</th><th>Відмова</th><th>Продано</th><th>Повторні ≥15%</th></tr>{out or ('<tr><td>ще не завантажено — тисни «Оновити з SalesDrive»</td></tr>' if empty else '')}</table>
+<p style=color:#A1939A;font-size:12px>У клітинці: <b>% (кількість)</b>. <b>Заявки</b> — усі замовлення місяця без тесту й видалених (видалені = спам/дублі). <b>Скасовано</b> = «Скасований» до відправки ÷ заявки (ціль ≤18%, зелений — у нормі). <b>Відмова</b> = Decline (не викупили посилку) — пізній статус, свіжий місяць занижує. <b>Продано</b> = SOLD ÷ заявки. <b>Повторні</b> = покупці місяця, що вже купували раніше ÷ усі покупці (ціль ≥15%; ранні місяці занижені, бо історія рахується з наявних даних). Усе прямо з SalesDrive, кожне замовлення — раз.</p>
+<p><a href="/kpirefresh?key={AK}" style="display:inline-block;background:#C94F72;color:#fff;padding:7px 16px;border-radius:8px;font-size:13px">↻ Оновити з SalesDrive</a> <span style=color:#A1939A;font-size:12px>займає ~10 хв (ліміти SalesDrive; з історією для «Повторні»)</span></p></section>
 </div></html>"""
 
 def _nav(active, AK):
