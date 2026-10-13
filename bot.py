@@ -501,8 +501,15 @@ def personalize(body, cid):
         if r and r[0]: name = r[0].split()[0]
     total = DB.execute("select coalesce(sum(amount),0) from orders where phone=? and status not in (6,7,13,15,8)", (phone,)).fetchone()[0] if phone else 0
     cur, nxt = level_of(total)
-    repl = {"{імя}": name or "Мамо", "{ім'я}": name or "Мамо", "{name}": name or "Мамо",
-            "{сума}": fmt(total),
+    if name:
+        for k in ("{імя}", "{ім'я}", "{name}"): body = body.replace(k, name)
+    else:
+        # нема імені → без звертання: прибираємо токен (+ кому/пробіл) на початку, решту речення з великої літери
+        body = re.sub(r"^\s*\{(?:імя|ім'я|name)\}\s*,?\s*", "", body)
+        for k in ("{імя}", "{ім'я}", "{name}"): body = body.replace(k, "")
+        body = body.lstrip()
+        if body: body = body[0].upper() + body[1:]
+    repl = {"{сума}": fmt(total),
             "{залишок}": fmt(nxt[0] - total) if nxt else "0",
             "{рівень}": f"{nxt[1]}%" if nxt else f"{cur[1]}%" if cur else "",
             "{поточна}": f"{cur[1]}%" if cur else "0%"}
