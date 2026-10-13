@@ -1697,9 +1697,9 @@ def border_page(pid):
 
 def sched_page(sid):
     AK = os.environ.get("ADMIN_KEY", "")
-    row = DB.execute("select run_ts, seg, body, done from scheduled where id=?", (sid,)).fetchone()
+    row = DB.execute("select run_ts, seg, body, done, coalesce(btn,''), coalesce(img,'') from scheduled where id=?", (sid,)).fetchone()
     if not row: return "<p>Розсилку не знайдено</p>"
-    rts, seg, body, done = row
+    rts, seg, body, done, btn, img = row
     when = time.strftime("%d.%m о %H:%M", time.localtime(rts))
     excl = {r[0] for r in DB.execute("select chat_id from sched_excl where sid=?", (sid,))}
     ids = resolve_ids((seg or "").lower())
@@ -1733,7 +1733,9 @@ def sched_page(sid):
 <p><a href="/posts?key={AK}">← до розсилок</a></p>
 <section class="p wide"><h2>{SEG_UA_G.get(seg, seg or 'усі')} <small>{when}</small></h2>
 {doneb}{note}
-<div style="background:#FBF7F5;border:1px dashed #E8DCD8;border-radius:8px;padding:8px 12px;margin:0 0 12px;color:#6E5F65;white-space:pre-wrap;font-size:13px">{(body or '')[:400]}</div>
+<div style="font-size:12px;color:#A1939A;margin:0 0 4px">Повний текст розсилки{(" · 🖼 з фото" if img else "")}{(" · 🔘 " + btn.split("|")[0] if btn else "")}:</div>
+<div style="background:#FBF7F5;border:1px dashed #E8DCD8;border-radius:8px;padding:12px 14px;margin:0 0 14px;color:#2B2226;white-space:pre-wrap;font-size:14px;line-height:1.5">{body or ''}</div>
+<h2 style=margin-top:16px>Отримувачі</h2>
 <table><tr><th>Імʼя</th><th>Телефон</th><th>Покупки</th><th>Стадія</th><th>Останнє замовлення</th><th></th></tr>{rows or '<tr><td>нема отримувачів</td></tr>'}</table></section>
 </div></html>"""
 
