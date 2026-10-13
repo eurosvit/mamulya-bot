@@ -1329,6 +1329,17 @@ class Hook(BaseHTTPRequestHandler):
                     if DB.execute("insert or ignore into sched_excl values(?,?)", (sid, cid)).rowcount: n_ += 1
             DB.commit()
             self.send_response(200); self.end_headers(); self.wfile.write(f"excluded {n_} men from #{sid}".encode()); return
+        if u.path == "/exclbought" and authed:  # виключити тих, хто вже купив товар за ключем ?id=N&kw=уртк,уховик
+            sid = int(qs.get("id", ["0"])[0] or 0)
+            kws = [k for k in qs.get("kw", [""])[0].split(",") if k]
+            seg = (DB.execute("select seg from scheduled where id=?", (sid,)).fetchone() or [""])[0]
+            n_ = 0
+            for cid in resolve_ids((seg or "").lower()):
+                ph = (DB.execute("select coalesce(phone,'') from customers where chat_id=?", (cid,)).fetchone() or [""])[0]
+                if ph and any(DB.execute("select 1 from orders where phone=? and status not in (6,7,13,15,8) and items like ? limit 1", (ph, f"%{k}%")).fetchone() for k in kws):
+                    if DB.execute("insert or ignore into sched_excl values(?,?)", (sid, cid)).rowcount: n_ += 1
+            DB.commit()
+            self.send_response(200); self.end_headers(); self.wfile.write(f"excluded {n_} buyers from #{sid}".encode()); return
         if u.path == "/scheddel" and authed:  # скасувати заплановану розсилку ?id=N
             sid = int(qs.get("id", ["0"])[0] or 0)
             nd = DB.execute("delete from scheduled where id=? and done=0", (sid,)).rowcount
