@@ -1639,9 +1639,9 @@ def posts_page():
         for amt, items, ots, phone, nm, store in lst:
             if store: bs.setdefault(store, [0, 0]); bs[store][0] += 1; bs[store][1] += amt
     store_rows = "".join(f"<tr><td>{st}</td><td class=n>{c}</td><td class=n>{r:,.0f}".replace(",", " ") + "</td></tr>" for st, (c, r) in sorted(bs.items(), key=lambda x: -x[1][1])) or "<tr><td>поки нема</td></tr>"
-    sched = q("select id, run_ts, seg, body, btn, done, sent, total from scheduled order by done, run_ts")
+    sched = q("select id, run_ts, seg, body, btn, done, sent, total, coalesce(img,'') from scheduled order by done, run_ts")
     sched_rows = ""
-    for sid, rts, seg, body, btn, done, snt, tot in sched:
+    for sid, rts, seg, body, btn, done, snt, tot, img in sched:
         when = time.strftime("%d.%m %H:%M", time.localtime(rts))
         nex = n("select count(*) from sched_excl where sid=?", sid)
         if done:
@@ -1650,7 +1650,7 @@ def posts_page():
             eff = len([c for c in resolve_ids((seg or '').lower()) if not nex or not DB.execute('select 1 from sched_excl where sid=? and chat_id=?', (sid, c)).fetchone()])
             st = f"⏳ очікує · <b>{eff}</b> отримувачів" + (f" <span style=color:#B8325A>(−{nex} вручну)</span>" if nex else "")
             who = f"<a href='/sched?key={AK}&id={sid}'>👁 кому піде</a>"
-        sched_rows += f"<tr><td>#{sid}</td><td>{when}</td><td>{SEG_UA.get(seg, seg or 'усі')}</td><td>{st}</td><td>{who}</td><td style=max-width:260px;white-space:normal;color:#6E5F65>{(body or '')[:80]}" + ("  🔘" if btn else "") + "</td></tr>"
+        sched_rows += f"<tr><td>#{sid}</td><td>{when}</td><td>{SEG_UA.get(seg, seg or 'усі')}</td><td>{st}</td><td>{who}</td><td style=max-width:420px;white-space:pre-wrap;color:#6E5F65;font-size:12.5px>{body or ''}" + ("  🔘" if btn else "") + ("  🖼" if img else "") + "</td></tr>"
     cards = [("Розсилок", len(posts)), ("Доставлено", tot_deliv), ("Замовлень після (7д)", tot_ord), ("Оборот, грн", f"{tot_rev:,.0f}".replace(",", " "))]
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Розсилки — Mamulya Bot</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
