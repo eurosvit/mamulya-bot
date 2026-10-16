@@ -1,1 +1,3 @@
-# stdlib only
+# stdlib only, крім GA4 (підпис RS256 — не stdlib)
+google-auth>=2.0
+requests>=2.28

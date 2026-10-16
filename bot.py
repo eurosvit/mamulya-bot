@@ -50,7 +50,7 @@ try: DB.execute("alter table kpi_cache add column ret_num int default 0")
 except Exception: pass
 try: DB.execute("alter table kpi_cache add column ret_den int default 0")
 except Exception: pass
-for _c in ("seo_sold", "seo_rev", "seo_new", "seo_den"):
+for _c in ("seo_sold", "seo_rev", "seo_new", "seo_den", "seo_sess"):
     try: DB.execute(f"alter table kpi_cache add column {_c} int default 0")
     except Exception: pass
 try: DB.execute("alter table scheduled add column img text default ''")
@@ -895,6 +895,32 @@ def pull_all(sajts, max_pages=80):
         page += 1; time.sleep(7)
     return out
 
+def ga_sessions(prop):
+    # {YYYY-MM: органічні сесії GA4} з початку року; потрібні env GA_SA_KEY(JSON) + property
+    key = os.environ.get("GA_SA_KEY", "")
+    if not (key and prop): return {}
+    try:
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import Request
+        import requests
+        creds = service_account.Credentials.from_service_account_info(
+            json.loads(key), scopes=["https://www.googleapis.com/auth/analytics.readonly"])
+        creds.refresh(Request())
+        body = {"dateRanges": [{"startDate": "2026-01-01", "endDate": "today"}],
+                "dimensions": [{"name": "yearMonth"}], "metrics": [{"name": "sessions"}],
+                "dimensionFilter": {"filter": {"fieldName": "sessionDefaultChannelGroup",
+                    "stringFilter": {"value": "Organic Search"}}}}
+        r = requests.post(f"https://analyticsdata.googleapis.com/v1beta/properties/{prop}:runReport",
+                          headers={"Authorization": f"Bearer {creds.token}"}, json=body, timeout=30)
+        r.raise_for_status()
+        out = {}
+        for row in r.json().get("rows", []):
+            ym = row["dimensionValues"][0]["value"]  # YYYYMM
+            out[f"{ym[:4]}-{ym[4:]}"] = int(row["metricValues"][0]["value"])
+        return out
+    except Exception as e:
+        print("ga_sessions", e); return {}
+
 def kpi_refresh():
     # один прохід по магазину (вкладаємось у 100 запитів/год SalesDrive): усе рахуємо локально
     if not os.environ.get("SALESDRIVE_KEY"): return
@@ -937,6 +963,11 @@ def kpi_refresh():
                        "on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated,ret_num=excluded.ret_num,ret_den=excluded.ret_den,seo_sold=excluded.seo_sold,seo_rev=excluded.seo_rev,seo_new=excluded.seo_new,seo_den=excluded.seo_den",
                        (store, ym, d["zay"], d["canc"], d["decl"], d["sold"], time.time(), len(R), len(B), d["seo_sold"], round(d["seo_rev"]), len(sn), len(sb)))
         DB.commit()
+        prop = os.environ.get("GA_PROPERTY", "") if store == "Mamulya.lviv" else ""  # поки лише Mamulya має GA-property
+        if prop:
+            for ym, s in ga_sessions(prop).items():
+                if ym >= "2026-01": DB.execute("update kpi_cache set seo_sess=? where store=? and ym=?", (s, store, ym))
+            DB.commit()
     print("kpi_refresh done")
 
 def sync_orders(pages, limit=50):
@@ -1537,6 +1568,14 @@ class Hook(BaseHTTPRequestHandler):
         if u.path == "/kpirefresh" and authed:
             threading.Thread(target=kpi_refresh, daemon=True).start()
             self.send_response(302); self.send_header("Location", f"/kpi?key={os.environ.get('ADMIN_KEY','')}"); self.end_headers(); return
+        if u.path == "/garefresh" and authed:  # лише GA4-сесії для Mamulya (без вантаження SalesDrive)
+            prop = os.environ.get("GA_PROPERTY", ""); g = ga_sessions(prop); n = 0
+            for ym, s in g.items():
+                if ym >= "2026-01":
+                    DB.execute("update kpi_cache set seo_sess=? where store='Mamulya.lviv' and ym=?", (s, ym)); n += 1
+            DB.commit()
+            self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
+            self.wfile.write(f"ga rows={len(g)} updated={n}\n{json.dumps(g, ensure_ascii=False)}".encode()); return
         if u.path == "/sched" and authed:
             sid = int(qs.get("id", ["0"])[0])
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
@@ -1894,17 +1933,20 @@ def seo_page(store=None):
     STORE = store if store in all_stores else all_stores[0]
     sw = "".join(f'<a class="{"on" if s==STORE else ""}" href="/seo?key={AK}&store={urllib.parse.quote(s)}">{s}</a>' for s in all_stores)
     UA_MON = ["", "січень", "лютий", "березень", "квітень", "травень", "червень", "липень", "серпень", "вересень", "жовтень", "листопад", "грудень"]
-    rows = DB.execute("select ym, seo_sold, seo_rev, seo_new, seo_den from kpi_cache where store=? order by ym desc", (STORE,)).fetchall()
+    rows = DB.execute("select ym, seo_sold, seo_rev, seo_new, seo_den, seo_sess from kpi_cache where store=? order by ym desc", (STORE,)).fetchall()
     upd = DB.execute("select max(updated) from kpi_cache").fetchone()[0]
     upd_s = time.strftime("%d.%m %H:%M", time.localtime(upd)) if upd else "—"
     out = ""
-    for ym, ssold, srev, snew, sden in rows:
+    for ym, ssold, srev, snew, sden, sess in rows:
         y, mm = ym.split("-"); nm = f"{UA_MON[int(mm)]} {y}"
         rep = sden - snew
         newp = f"{snew/sden*100:.0f}%" if sden else "—"
+        vis = f"{sess:,}".replace(",", " ") if sess else "—"
+        conv = f"{ssold/sess*100:.1f}%" if sess else "—"
+        cg = "#6E5F65" if sess else "#C9BDB8"
         out += (f"<tr><td>{nm}</td><td><b>{ssold}</b></td><td>{('%d' % srev).replace(chr(44),' ')} грн</td>"
                 f"<td>{snew} <span style=color:#A1939A>({newp})</span></td><td>{rep}</td>"
-                f"<td style=color:#C9BDB8>—</td><td style=color:#C9BDB8>—</td></tr>")
+                f"<td style=color:{cg}>{vis}</td><td style=color:{cg}>{conv}</td></tr>")
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>SEO — {STORE}</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
@@ -1920,7 +1962,7 @@ def seo_page(store=None):
 <ul style=margin:0;padding-left:18px;line-height:1.75>
 <li><b>Продажі / Оборот</b> — отримані (SOLD) замовлення <b>без рекламної кампанії</b> (органічний пошук + прямі заходи; реклама/бот/соцмережі виключені).</li>
 <li><b>Нові / Повторні</b> — серед органічних покупців місяця: для кого це перша отримана покупка / хто вже купував.</li>
-<li><b>Відвідувачі / Конверсія</b> — «—», бо сесій у SalesDrive нема. Підключимо, коли даси доступ до <b>GA4</b> mamulya.lviv.ua (канал Organic Search).</li>
+<li><b>Відвідувачі</b> — органічні сесії з <b>GA4</b> (канал Organic Search), <b>Конверсія</b> = органічні продажі ÷ сесії. «—» для магазинів без підключеної GA4-property.</li>
 </ul></div></section>
 </div></html>"""
 
