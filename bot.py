@@ -1929,6 +1929,8 @@ def admin_page():
     picks = {r[0]: r[1] for r in q("select cnt, count(*) from (select c.chat_id, (select count(*) from gifts g where g.chat_id=c.chat_id) cnt from customers c) group by cnt")}
     p0 = picks.get(0, 0); p1 = picks.get(1, 0); p2 = sum(v for k, v in picks.items() if k >= 2)
     pickers = nc - p0
+    # чекають подарунка = мають отримане замовлення (SOLD) і ще 0 подарунків → можуть обрати
+    waiting = n("select count(*) from customers c where coalesce(c.phone,'')!='' and not exists(select 1 from gifts g where g.chat_id=c.chat_id) and exists(select 1 from orders o where o.phone=c.phone and o.status=5)")
     bso = dict(q(f"select store, count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8) and store in {LOYAL} group by 1"))
     bse = dict(q(f"select store, count(*) from customers where created>={LAUNCH} and coalesce(store,'')!='' group by 1"))
     daily_o = dict(q(f"select date(ts,'unixepoch','localtime') d, count(*) from orders where ts>={LAUNCH} and status not in (6,7,13,15,8) and store in {LOYAL} group by d"))
@@ -2008,6 +2010,7 @@ def admin_page():
         c = (f"{e/o*100:.0f}%" if o else "—") if sms_store else "без SMS"
         fun += f"<tr class=sub><td>{st}</td><td class=n>{o} → {e}</td><td class=n>{c}</td></tr>"
     fun += f"""<tr><td>Нічого не обрали</td><td class=n>{p0}</td><td class=n>{(p0/nc*100 if nc else 0):.0f}%</td></tr>
+<tr><td>↳ 🎁 Чекають подарунка <small style=color:#A1939A>(є отримане замовл., ще 0 подарунків)</small></td><td class=n style=color:#B8325A><b>{waiting}</b></td><td class=n>{(waiting/p0*100 if p0 else 0):.0f}% з них</td></tr>
 <tr><td>Обрали 1</td><td class=n>{p1}</td><td class=n>{(p1/nc*100 if nc else 0):.0f}%</td></tr>
 <tr><td>Обрали 2+</td><td class=n>{p2}</td><td class=n>{(p2/nc*100 if nc else 0):.0f}%</td></tr>"""
 
