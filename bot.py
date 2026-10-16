@@ -454,6 +454,11 @@ def parse_button(body):
 
 def resolve_ids(seg):
     seg = (seg or "").lower()
+    if "+" in seg:   # обʼєднання сегментів: bought:вагітн|годуюч+nobuy
+        out = set()
+        for part in seg.split("+"):
+            if part: out.update(resolve_ids(part))
+        return list(out)
     if seg.startswith("bought:"):
         # хто купував товар за ключем(ами через |): bought:вагітн|годуюч
         kws = [k for k in seg[7:].split("|") if k]
