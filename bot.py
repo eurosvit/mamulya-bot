@@ -963,7 +963,7 @@ def kpi_refresh():
                        "on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated,ret_num=excluded.ret_num,ret_den=excluded.ret_den,seo_sold=excluded.seo_sold,seo_rev=excluded.seo_rev,seo_new=excluded.seo_new,seo_den=excluded.seo_den",
                        (store, ym, d["zay"], d["canc"], d["decl"], d["sold"], time.time(), len(R), len(B), d["seo_sold"], round(d["seo_rev"]), len(sn), len(sb)))
         DB.commit()
-        prop = os.environ.get("GA_PROPERTY", "") if store == "Mamulya.lviv" else ""  # поки лише Mamulya має GA-property
+        prop = os.environ.get("GA_PROPERTY", "") if store == "Mamulya" else ""  # мітка магазину в KPI_STORES = "Mamulya"; поки лише в нього є GA-property
         if prop:
             for ym, s in ga_sessions(prop).items():
                 if ym >= "2026-01": DB.execute("update kpi_cache set seo_sess=? where store=? and ym=?", (s, store, ym))
@@ -1572,7 +1572,8 @@ class Hook(BaseHTTPRequestHandler):
             prop = os.environ.get("GA_PROPERTY", ""); g = ga_sessions(prop); n = 0
             for ym, s in g.items():
                 if ym >= "2026-01":
-                    DB.execute("update kpi_cache set seo_sess=? where store='Mamulya.lviv' and ym=?", (s, ym)); n += 1
+                    cur = DB.execute("update kpi_cache set seo_sess=? where store='Mamulya' and ym=?", (s, ym))
+                    n += cur.rowcount
             DB.commit()
             self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
             self.wfile.write(f"ga rows={len(g)} updated={n}\n{json.dumps(g, ensure_ascii=False)}".encode()); return
