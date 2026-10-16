@@ -451,6 +451,13 @@ def parse_button(body):
 
 def resolve_ids(seg):
     seg = (seg or "").lower()
+    if seg.startswith("bought:"):
+        # хто купував товар за ключем(ами через |): bought:вагітн|годуюч
+        kws = [k for k in seg[7:].split("|") if k]
+        if not kws: return []
+        conds = " or ".join("o.items like ?" for _ in kws)
+        rows = DB.execute(f"select distinct c.chat_id from customers c join orders o on o.phone=c.phone and o.phone!='' where o.{SOLD_F} and ({conds})", [f"%{k}%" for k in kws]).fetchall()
+        return [r[0] for r in rows]
     if seg == "doman":
         # Картки Домана / Ліполенд: малюки за віком (усі baby-стадії + lipoland) АБО минулі покупці бренду Ліполенд
         rows = DB.execute(f"""select chat_id from customers c where c.stage in ('m0_3','m3_6','m6_12','lipoland')
