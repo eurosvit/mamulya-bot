@@ -28,7 +28,7 @@ create table if not exists b2b(phone text primary key);
 create table if not exists scheduled(id integer primary key autoincrement, run_ts real, seg text, body text, btn text, done int default 0, sent int default 0, total int default 0, img text default '');
 create table if not exists sched_excl(sid int, chat_id int, primary key(sid, chat_id));
 create table if not exists clicks(pid int, chat_id int, ts real);
-create table if not exists kpi_cache(store text, ym text, zay int, canc int, decl int, sold int, updated real, ret_num int default 0, ret_den int default 0, primary key(store, ym));
+create table if not exists kpi_cache(store text, ym text, zay int, canc int, decl int, sold int, updated real, ret_num int default 0, ret_den int default 0, seo_sold int default 0, seo_rev int default 0, seo_new int default 0, seo_den int default 0, primary key(store, ym));
 """)
 try: DB.execute("alter table orders add column amount real default 0")
 except Exception: pass
@@ -50,6 +50,9 @@ try: DB.execute("alter table kpi_cache add column ret_num int default 0")
 except Exception: pass
 try: DB.execute("alter table kpi_cache add column ret_den int default 0")
 except Exception: pass
+for _c in ("seo_sold", "seo_rev", "seo_new", "seo_den"):
+    try: DB.execute(f"alter table kpi_cache add column {_c} int default 0")
+    except Exception: pass
 try: DB.execute("alter table scheduled add column img text default ''")
 except Exception: pass
 DB.execute("create table if not exists noreply(order_id text primary key, ts real)")  # коли замовлення зайшло в NOREPLY
@@ -870,7 +873,7 @@ def sd_count(qs):
     return (sd_get(qs).get("totals") or {}).get("count", 0)
 
 def pull_all(sajts, max_pages=80):
-    # один прохід по всій історії магазину: (phone, 'YYYY-MM', statusId) для кожного замовлення
+    # один прохід по історії магазину: (phone, час, statusId, campaignId, amount) для кожного замовлення
     sj = "".join(f"&filter[sajt][]={s}" for s in sajts)
     out = []
     page = 1
@@ -882,7 +885,7 @@ def pull_all(sajts, max_pages=80):
             ph = norm_phone((c0.get("phone") or [""])[0] if c0 else "")
             ot = str(o.get("orderTime") or "")[:19]  # повний час для порівняння «перше/повторне»
             if len(ot) >= 7:
-                out.append((ph, ot, int(o.get("statusId") or 0)))
+                out.append((ph, ot, int(o.get("statusId") or 0), o.get("campaignId"), float(o.get("paymentAmount") or 0)))
         if len(data) < 100: break
         page += 1; time.sleep(7)
     return out
@@ -896,29 +899,38 @@ def kpi_refresh():
             orders = pull_all(sajts)
         except Exception as e:
             print("kpi_pull", store, e); continue
-        M = defaultdict(lambda: {"zay": 0, "canc": 0, "decl": 0, "sold": 0})
+        M = defaultdict(lambda: {"zay": 0, "canc": 0, "decl": 0, "sold": 0, "seo_sold": 0, "seo_rev": 0.0})
         # повторні рахуємо ЛИШЕ по SOLD (реально отримане) — інакше ловимо дублі-заявки
         first = {}
-        for ph, ot, st in orders:
+        for ph, ot, st, camp, amt in orders:
             if ph and st == 5:
                 if ph not in first or ot < first[ph]: first[ph] = ot
         buyers = defaultdict(set); repeat = defaultdict(set)
-        for ph, ot, st in orders:
+        seo_buyers = defaultdict(set); seo_new = defaultdict(set)
+        for ph, ot, st, camp, amt in orders:
             ym = ot[:7]
+            organic = not camp   # «без реклами» (порожня кампанія) = органіка/прямі = SEO
             if st not in (15, 8):           # чисті заявки (без тесту/видалених)
                 d = M[ym]; d["zay"] += 1
                 if st == 13: d["canc"] += 1
                 if st == 6: d["decl"] += 1
                 if st == 5: d["sold"] += 1
-            if ph and st == 5:              # SOLD → покупець місяця
-                buyers[ym].add(ph)
-                if ot > first[ph]: repeat[ym].add(ph)   # не перша отримана покупка → повторний
+            if st == 5:                     # SOLD
+                if ph:
+                    buyers[ym].add(ph)
+                    if ot > first[ph]: repeat[ym].add(ph)   # не перша отримана → повторний
+                if organic:
+                    M[ym]["seo_sold"] += 1; M[ym]["seo_rev"] += amt
+                    if ph:
+                        seo_buyers[ym].add(ph)
+                        if first.get(ph) == ot: seo_new[ym].add(ph)   # перша отримана покупка клієнта → новий
         for ym, d in M.items():
             if ym < "2026-09": continue
             B = buyers.get(ym, set()); R = repeat.get(ym, set())
-            DB.execute("insert into kpi_cache(store,ym,zay,canc,decl,sold,updated,ret_num,ret_den) values(?,?,?,?,?,?,?,?,?) "
-                       "on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated,ret_num=excluded.ret_num,ret_den=excluded.ret_den",
-                       (store, ym, d["zay"], d["canc"], d["decl"], d["sold"], time.time(), len(R), len(B)))
+            sb = seo_buyers.get(ym, set()); sn = seo_new.get(ym, set())
+            DB.execute("insert into kpi_cache(store,ym,zay,canc,decl,sold,updated,ret_num,ret_den,seo_sold,seo_rev,seo_new,seo_den) values(?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                       "on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated,ret_num=excluded.ret_num,ret_den=excluded.ret_den,seo_sold=excluded.seo_sold,seo_rev=excluded.seo_rev,seo_new=excluded.seo_new,seo_den=excluded.seo_den",
+                       (store, ym, d["zay"], d["canc"], d["decl"], d["sold"], time.time(), len(R), len(B), d["seo_sold"], round(d["seo_rev"]), len(sn), len(sb)))
         DB.commit()
     print("kpi_refresh done")
 
@@ -1501,6 +1513,9 @@ class Hook(BaseHTTPRequestHandler):
         if u.path == "/kpi" and authed:
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
             self.wfile.write(kpi_page(qs.get("store", [None])[0]).encode()); return
+        if u.path == "/seo" and authed:
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
+            self.wfile.write(seo_page(qs.get("store", [None])[0]).encode()); return
         if u.path == "/kpirefresh" and authed:
             threading.Thread(target=kpi_refresh, daemon=True).start()
             self.send_response(302); self.send_header("Location", f"/kpi?key={os.environ.get('ADMIN_KEY','')}"); self.end_headers(); return
@@ -1852,8 +1867,46 @@ def kpi_page(store=None):
 </div>
 </div></html>"""
 
+def seo_page(store=None):
+    AK = os.environ.get("ADMIN_KEY", "")
+    order = [s for s, _ in KPI_STORES]
+    have = set(r[0] for r in DB.execute("select distinct store from kpi_cache"))
+    all_stores = [s for s in order if s in have] or order
+    STORE = store if store in all_stores else all_stores[0]
+    sw = "".join(f'<a class="{"on" if s==STORE else ""}" href="/seo?key={AK}&store={urllib.parse.quote(s)}">{s}</a>' for s in all_stores)
+    UA_MON = ["", "січень", "лютий", "березень", "квітень", "травень", "червень", "липень", "серпень", "вересень", "жовтень", "листопад", "грудень"]
+    rows = DB.execute("select ym, seo_sold, seo_rev, seo_new, seo_den from kpi_cache where store=? order by ym desc", (STORE,)).fetchall()
+    upd = DB.execute("select max(updated) from kpi_cache").fetchone()[0]
+    upd_s = time.strftime("%d.%m %H:%M", time.localtime(upd)) if upd else "—"
+    out = ""
+    for ym, ssold, srev, snew, sden in rows:
+        y, mm = ym.split("-"); nm = f"{UA_MON[int(mm)]} {y}"
+        rep = sden - snew
+        newp = f"{snew/sden*100:.0f}%" if sden else "—"
+        out += (f"<tr><td>{nm}</td><td><b>{ssold}</b></td><td>{('%d' % srev).replace(chr(44),' ')} грн</td>"
+                f"<td>{snew} <span style=color:#A1939A>({newp})</span></td><td>{rep}</td>"
+                f"<td style=color:#C9BDB8>—</td><td style=color:#C9BDB8>—</td></tr>")
+    return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>SEO — {STORE}</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
+{CAB_CSS}
+<style>#st th,#st td{{text-align:left !important}}</style>
+<div class=top><h1>🔎 SEO / органіка · по місяцях</h1><span class=upd>дані SalesDrive, оновлено {upd_s}</span></div>
+{_nav("SEO", AK)}
+<div class=nav style=margin-top:-6px>{sw}</div>
+<div class=grid>
+<section class="p wide"><h2>Органічні продажі <small>{STORE} · «без рекламної кампанії» = органіка/прямі</small></h2>
+<table id=st><tr><th>Місяць</th><th>Продажі</th><th>Оборот</th><th>Нові</th><th>Повторні</th><th>Відвідувачі</th><th>Конверсія</th></tr>{out or '<tr><td>ще не завантажено — тисни «Оновити» на вкладці KPI</td></tr>'}</table>
+<div style="color:#6E5F65;font-size:12.5px;margin-top:8px">
+<ul style=margin:0;padding-left:18px;line-height:1.75>
+<li><b>Продажі / Оборот</b> — отримані (SOLD) замовлення <b>без рекламної кампанії</b> (органічний пошук + прямі заходи; реклама/бот/соцмережі виключені).</li>
+<li><b>Нові / Повторні</b> — серед органічних покупців місяця: для кого це перша отримана покупка / хто вже купував.</li>
+<li><b>Відвідувачі / Конверсія</b> — «—», бо сесій у SalesDrive нема. Підключимо, коли даси доступ до <b>GA4</b> mamulya.lviv.ua (канал Organic Search).</li>
+</ul></div></section>
+</div></html>"""
+
 def _nav(active, AK):
-    tabs = [("Огляд", f"/admin?key={AK}"), ("Розсилки", f"/posts?key={AK}"), ("KPI", f"/kpi?key={AK}")]
+    tabs = [("Огляд", f"/admin?key={AK}"), ("Розсилки", f"/posts?key={AK}"), ("KPI", f"/kpi?key={AK}"), ("SEO", f"/seo?key={AK}")]
     return '<div class=nav>' + "".join(f'<a class="{"on" if active==lbl else ""}" href="{url}">{lbl}</a>' for lbl, url in tabs) + '</div>'
 
 def admin_page():
