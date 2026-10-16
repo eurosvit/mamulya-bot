@@ -1021,6 +1021,19 @@ def cron():
             except Exception as e: print("remind", e)
             DB.execute("update coupons set reminded=1 where code=?", (code,))
         DB.commit()
+        # нагадування про невибраний подарунок: є отримане (SOLD) замовлення + 0 подарунків; каданс 14/45/90 днів, 3 дотики
+        for chat_id, phone in DB.execute("select chat_id, phone from customers where coalesce(phone,'')!='' and not exists(select 1 from gifts g where g.chat_id=customers.chat_id)").fetchall():
+            sold = DB.execute("select min(ts) from orders where phone=? and status=5", (phone,)).fetchone()[0]
+            if not sold: continue
+            days = (now - sold) / DAY
+            for d, key in ((14, "giftrem1"), (45, "giftrem2"), (90, "giftrem3")):
+                if d <= days < d + 7 and not DB.execute("select 1 from sent where chat_id=? and key=?", (chat_id, key)).fetchone():
+                    try:
+                        send(chat_id, T[key])
+                        DB.execute("insert into sent values(?,?,?)", (chat_id, key, now))
+                    except Exception as e: print("giftrem", e)
+                    break  # максимум один дотик за прогін
+        DB.commit()
         for sid, seg, body, btn_s, img in DB.execute("select id,seg,body,btn,coalesce(img,'') from scheduled where done=0 and run_ts<=?", (now,)).fetchall():
             btn = tuple(btn_s.split("|", 1)) if btn_s else None
             excl = {r[0] for r in DB.execute("select chat_id from sched_excl where sid=?", (sid,))}
@@ -2007,7 +2020,7 @@ def admin_page():
     for st in sorted(set(bso) | set(bse), key=lambda x: -bso.get(x, 0)):
         o, e = bso.get(st, 0), bse.get(st, 0)
         sms_store = st in ("Mamulya.lviv", "Modnamama", "Znana Mama")
-        c = (f"{e/o*100:.0f}%" if o else "—") if sms_store else "без SMS"
+        c = (f"{e/o*100:.0f}%" if o else "—") if sms_store else ("окремий бот" if st == "AntiAge" else "без SMS")
         fun += f"<tr class=sub><td>{st}</td><td class=n>{o} → {e}</td><td class=n>{c}</td></tr>"
     fun += f"""<tr><td>Нічого не обрали</td><td class=n>{p0}</td><td class=n>{(p0/nc*100 if nc else 0):.0f}%</td></tr>
 <tr><td>↳ 🎁 Чекають подарунка <small style=color:#A1939A>(є отримане замовл., ще 0 подарунків)</small></td><td class=n style=color:#B8325A><b>{waiting}</b></td><td class=n>{(waiting/p0*100 if p0 else 0):.0f}% з них</td></tr>
