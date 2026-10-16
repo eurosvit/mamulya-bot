@@ -930,7 +930,7 @@ def kpi_refresh():
                         seo_buyers[ym].add(ph)
                         if first.get(ph) == ot: seo_new[ym].add(ph)   # перша отримана покупка клієнта → новий
         for ym, d in M.items():
-            if ym < "2026-09": continue
+            if ym < "2026-01": continue
             B = buyers.get(ym, set()); R = repeat.get(ym, set())
             sb = seo_buyers.get(ym, set()); sn = seo_new.get(ym, set())
             DB.execute("insert into kpi_cache(store,ym,zay,canc,decl,sold,updated,ret_num,ret_den,seo_sold,seo_rev,seo_new,seo_den) values(?,?,?,?,?,?,?,?,?,?,?,?,?) "
@@ -1832,6 +1832,7 @@ def kpi_page(store=None):
     out = ""
     tz = tc = td_ = ts = trn = trd = 0
     for ym, zay, canc, decl, sold, rn, rd in rows:
+        if ym < "2026-09": continue   # KPI-скасування рахуємо з вересня
         y, mm = ym.split("-"); nm = f"{UA_MON[int(mm)]} {y}"
         tz += zay; tc += canc; td_ += decl; ts += sold; trn += rn; trd += rd
         out += (f"<tr><td>{nm}</td><td>{zay}</td>"
