@@ -1,0 +1,185 @@
+# Транзакційні листи Mamulya.lviv (Resend). Памятка адаптується під категорію товару.
+MEMO_SUBJECT = "Ваше замовлення вже в дорозі! \U0001F69A Коротка памятка"
+# бренд-кольори з лого: кораловий #F07068 (для тексту/кнопок трохи темніший #E05A50), блиш #FCEBEA
+
+# ---- класифікація замовлення за назвами товарів (пріоритет згори вниз) ----
+_KW = [
+    ("nonreturn", ("бюстгал", "трус", "білизн", "купальник", "колгот", "панчох", "косметик", "крем для", "гігієн")),
+    ("sling",     ("слінг", "ерго", "хіпсіт", "хипсит", "май-слінг", "намотк", "слингонакид", "слінгонакид", "перенос")),
+    ("toy",       ("lipoland", "ліполенд", "ліпуч", "ліпол", "домана", "пекс")),
+    ("furniture", ("ліжеч", "ліжко", "комод", "пеленат", "стільч", "стілец", "крісл", "матрац", "вежа помічник",
+                   "меблі", "модульн", "коляск", "автокрісл", "бустер", "шафа")),
+]
+def memo_category(items):
+    t = " ".join(str(i) for i in (items or [])).lower()
+    for cat, kws in _KW:
+        if any(k in t for k in kws):
+            return cat
+    return "clothing"
+
+import os as _os
+# куди Яна заллє гіфки (той самий /uploads/images, де лого); можна перевизначити env MAIL_ASSET_BASE
+ASSET = _os.environ.get("MAIL_ASSET_BASE", "https://mamulya.lviv.ua/uploads/images").rstrip("/")
+def _div(name, w=300):
+    return (f'<tr><td style="padding:10px 32px 0;text-align:center;">'
+            f'<img src="{ASSET}/{name}" width="{w}" alt="" style="width:{w}px;max-width:82%;height:auto;"/></td></tr>')
+
+# ---- верх листа: лого, герой, коли отримаєте, способи доставки (спільне) ----
+_TOP = r"""<!doctype html>
+<html lang="uk"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting"><title>Памятка Mamulya.lviv</title></head>
+<body style="margin:0;padding:0;background:#f4ece9;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#4a3f44;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">Ваше замовлення в дорозі 💗 Коротка памятка: як прийняти, оглянути, повернути чи обміняти.</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4ece9;"><tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 2px 14px rgba(140,90,110,.10);">
+  <tr><td style="background:#ffffff;padding:26px 32px 10px;text-align:center;">
+    <img src="https://mamulya.lviv.ua/uploads/images/logo-mamulya.png" width="190" alt="Mamulya.lviv" style="width:190px;max-width:62%;height:auto;" />
+  </td></tr>
+  <tr><td style="padding:6px 32px 8px;text-align:center;">
+    <img src="REPLACED_HERO" width="300" alt="" style="width:300px;max-width:82%;height:auto;margin-bottom:2px;"/>
+  </td></tr>
+  <tr><td style="padding:2px 32px 10px;text-align:center;">
+    <h1 style="margin:0 0 8px;font-size:23px;color:#3a2f34;font-weight:700;">Ваше замовлення вже в дорозі!</h1>
+    <p style="margin:0;font-size:15px;line-height:1.6;color:#6e5f65;">Нова Пошта везе його до вас. Тримайте коротку памятку — як прийняти, оглянути та (за потреби) повернути.<br>Збережіть лист, щоб була під рукою.</p>
+  </td></tr>
+  <tr><td style="padding:22px 32px 4px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FCEBEA;border-radius:14px;"><tr><td style="padding:18px 20px;">
+      <div style="font-size:17px;font-weight:700;color:#E05A50;">📦 Коли чекати</div>
+      <ul style="margin:10px 0 0;padding-left:20px;font-size:14.5px;line-height:1.7;color:#4a3f44;">
+        <li>Нова Пошта доставляє зазвичай за <b>1–3 дні</b>.</li>
+        <li><b>Номер накладної (ТТН)</b> шукайте в SMS від Нової Пошти — за ним відстежуйте посилку в застосунку НП.</li>
+      </ul>
+      <p style="margin:10px 0 0;font-size:13px;line-height:1.6;color:#9a8b90;">🕊 Працюємо в умовах воєнного часу — тривоги чи збої інколи затримують доставку. Якщо щось піде не так — повідомимо вас особисто.</p>
+    </td></tr></table>
+  </td></tr>
+"""
+
+# ---- блок завдатку (перед ним — гіфка) ----
+_DEPOSIT = r"""
+  <tr><td style="padding:14px 32px 4px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fbf7ee;border-radius:14px;"><tr><td style="padding:16px 20px;">
+      <div style="font-size:16px;font-weight:700;color:#c79a3e;">💳 Про завдаток 200 грн</div>
+      <p style="margin:8px 0 0;font-size:14px;line-height:1.65;color:#4a3f44;">Це передоплата, що бронює відправку при накладеному платежі. При <b>відмові від посилки після відправлення</b> завдаток не повертається — ми вже оплатили пересилання.</p>
+    </td></tr></table>
+  </td></tr>
+"""
+
+# ---- хвіст листа: кнопки, контакти, футер (спільне) ----
+_TAIL = r"""
+  <tr><td style="padding:24px 32px 6px;text-align:center;">
+    <a href="https://mamulya.lviv.ua/dostavka-i-oplata" style="display:inline-block;background:#E05A50;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 22px;border-radius:10px;margin:4px;">📦 Доставка та оплата</a>
+    <a href="https://mamulya.lviv.ua/povernennya" style="display:inline-block;background:#ffffff;color:#E05A50;text-decoration:none;font-size:14px;font-weight:600;padding:11px 22px;border-radius:10px;border:1.5px solid #E05A50;margin:4px;">🔁 Повернення та обмін</a>
+  </td></tr>
+  <tr><td style="padding:14px 32px 28px;text-align:center;">
+    <div style="font-size:15px;font-weight:700;color:#3a2f34;">📞 Маєте питання?</div>
+    <p style="margin:6px 0 0;font-size:14px;line-height:1.7;color:#6e5f65;">
+      Телефон / Viber / Telegram: <a href="tel:+380636324010" style="color:#E05A50;text-decoration:none;font-weight:600;">063-632-40-10</a><br>
+      Пошта: <a href="mailto:mamulyashopping@gmail.com" style="color:#E05A50;text-decoration:none;">mamulyashopping@gmail.com</a><br>
+      <span style="color:#9a8b90;font-size:13px;">Пн–Пт 10:00–17:00</span>
+    </p>
+  </td></tr>
+  <tr><td style="background:#f4ece9;padding:18px 32px;text-align:center;">
+    <div style="font-size:12px;color:#a99ba0;line-height:1.6;">Mamulya.lviv · турботливий магазин для мам 💗<br>Ви отримали цей лист, бо оформили замовлення на mamulya.lviv.ua</div>
+  </td></tr>
+</table></td></tr></table></body></html>"""
+
+# ---- секція «Як прийняти» під категорію ----
+def _accept(title, bullets, tint="#eef6f0", head="#3f9d6c"):
+    lis = "".join(f"<li>{b}</li>" for b in bullets)
+    return (f'<tr><td style="padding:18px 32px 4px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            f'style="background:{tint};border-radius:14px;"><tr><td style="padding:18px 20px;">'
+            f'<div style="font-size:17px;font-weight:700;color:{head};">{title}</div>'
+            f'<ul style="margin:10px 0 0;padding-left:20px;font-size:14.5px;line-height:1.7;color:#4a3f44;">{lis}</ul>'
+            f'</td></tr></table></td></tr>')
+
+ACCEPT = {
+ "clothing": _accept("✅ Як прийняти посилку", [
+    "Розпаковуйте <b>у відділенні, при менеджері</b> — так можна одразу оформити огляд.",
+    "Перевірте модель, розмір, колір, комплектність і цілісність.",
+    "За можливості — <b>зніміть відео розпакування</b> без зупинки. Це ваша страховка.",
+    "При накладеному платежі решту сплачуєте <b>після огляду</b>."]),
+ "furniture": _accept("✅ Як прийняти великогабарит", [
+    "Приймайте <b>при менеджері або курʼєрі</b>, не відходячи.",
+    "Перевірте цілісність упаковки, відсутність сколів і пошкоджень.",
+    "Звірте <b>комплектність</b> — усі деталі, кріплення та інструкція на місці.",
+    "<b>Зніміть відео розпакування</b> — головна страховка при пошкодженні в дорозі.",
+    "При накладеному платежі решту сплачуєте <b>після огляду</b>."]),
+ "sling": _accept("✅ Як прийняти слінг / ерго", [
+    "Перевірте тканину, строчки та <b>кільця/пряжки/фастекси</b> — цілісність кріплень важлива для безпеки малюка.",
+    "Звірте модель і колір.",
+    "Підбір — <b>за віком і вагою малюка</b>, не за розміром одягу. Не впевнені — напишіть, підкажемо.",
+    "До виробу додається інструкція/відео намотування.",
+    "За можливості — зніміть відео розпакування."], tint="#eef3f8", head="#4a7fb0"),
+ "toy": _accept("✅ Як прийняти гру", [
+    "Перевірте <b>комплектність</b> — усі картки й елементи на місці.",
+    "Перевірте цілісність ліпучок і звірте гру з описом на сайті.",
+    "Догляд: <b>не періть у машинці</b> — протирайте вологою серветкою.",
+    "За можливості — зніміть відео розпакування."], tint="#fdf4ec", head="#cf8a3f"),
+ "nonreturn": _accept("✅ Як прийняти — перевірте одразу", [
+    "Розпаковуйте <b>у відділенні, при менеджері</b>.",
+    "Перевірте модель, розмір, колір і цілісність.",
+    "⚠️ <b>Цей товар поверненню та обміну не підлягає</b> за гігієнічними причинами — тож перевірте все особливо уважно <b>до оплати</b>.",
+    "При накладеному платежі решту сплачуєте після огляду."], tint="#FCEBEA", head="#d06060"),
+}
+
+# ---- секція «Повернення» під категорію ----
+_STEPS4 = ('<td width="50%" valign="top" style="padding:0 5px;"><div style="background:#FBF1EF;border-radius:12px;padding:14px 16px;">'
+    '<div style="font-size:14px;font-weight:700;color:#3f9d6c;">↩️ Як повернути — 4 кроки</div>'
+    '<ol style="margin:8px 0 0;padding-left:18px;font-size:13px;line-height:1.65;color:#4a3f44;">'
+    '<li>Напишіть нам <b>до відправлення</b></li><li>Запакуйте з бірками й упаковкою</li>'
+    '<li>Відправте Новою Поштою («Легке повернення» — безкоштовно)</li><li>Отримайте кошти після перевірки</li>'
+    '</ol></div></td>')
+
+def _returns(intro, right_html, steps=True):
+    left = _STEPS4 if steps else ""
+    grid = f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>{left}{right_html}</tr></table>' if right_html or steps else ""
+    return (f'<tr><td style="padding:18px 32px 4px;">'
+            f'<div style="font-size:17px;font-weight:700;color:#E05A50;margin-bottom:10px;">🔁 Повернення та обмін — 14 днів</div>'
+            f'<p style="margin:0 2px 10px;font-size:14px;line-height:1.6;color:#4a3f44;">{intro}</p>{grid}</td></tr>')
+
+_RIGHT_NONRET = ('<td width="50%" valign="top" style="padding:0 5px;"><div style="background:#FCEBEA;border-radius:12px;padding:14px 16px;">'
+    '<div style="font-size:14px;font-weight:700;color:#d06060;">🚫 Не підлягають поверненню</div>'
+    '<ul style="margin:8px 0 0;padding-left:18px;font-size:13px;line-height:1.65;color:#4a3f44;">'
+    '<li>Білизна (бюстгальтери, трусики)</li><li>Купальники</li><li>Колготи, панчішно-шкарпеткові</li><li>Косметика й гігієна</li>'
+    '</ul></div></td>')
+
+RETURNS = {
+ "clothing": _returns(
+    "Якщо не підійшов розмір, фасон чи колір — обміняємо або повернемо протягом <b>14 днів</b>. Головне: річ не носили, а <b>бірки, ярлики й упаковка</b> на місці.",
+    _RIGHT_NONRET) + '<tr><td style="padding:0 32px;"><p style="margin:10px 2px 0;font-size:12.5px;color:#9a8b90;">Брак з вини виробника — обмін і доставка за наш рахунок. Перелік за постановою КМУ №172.</p></td></tr>',
+ "furniture": _returns(
+    "Товар належної якості обміняємо або повернемо протягом <b>14 днів</b>, якщо він не використовувався, збережено вигляд, комплектність та упаковку.",
+    '<td width="50%" valign="top" style="padding:0 5px;"><div style="background:#FBF1EF;border-radius:12px;padding:14px 16px;">'
+    '<div style="font-size:14px;font-weight:700;color:#E05A50;">📦 Великогабарит</div>'
+    '<ul style="margin:8px 0 0;padding-left:18px;font-size:13px;line-height:1.65;color:#4a3f44;">'
+    '<li>Зворотну доставку узгоджуємо окремо — напишіть нам</li><li>Брак чи пошкодження з нашої вини — заміна й доставка за наш рахунок</li>'
+    '</ul></div></td>'),
+ "sling": _returns(
+    "Слінг чи ерго-рюкзак можна повернути протягом <b>14 днів</b>, якщо він <b>не використовувався</b> (не прали), а бірки й упаковка на місці.",
+    '<td width="50%" valign="top" style="padding:0 5px;"><div style="background:#eef3f8;border-radius:12px;padding:14px 16px;">'
+    '<div style="font-size:14px;font-weight:700;color:#4a7fb0;">🤱 Не підійшов тип?</div>'
+    '<p style="margin:8px 0 0;font-size:13px;line-height:1.6;color:#4a3f44;">Спершу напишіть нам — часто питання намотування вирішується консультацією. Брак кріплень — заміна за наш рахунок.</p>'
+    '</div></td>'),
+ "toy": _returns(
+    "Гру належної якості обміняємо або повернемо протягом <b>14 днів</b>, якщо збережено товарний вигляд, комплектність і упаковку, а гра не була у використанні.",
+    '<td width="50%" valign="top" style="padding:0 5px;"><div style="background:#fdf4ec;border-radius:12px;padding:14px 16px;">'
+    '<div style="font-size:14px;font-weight:700;color:#cf8a3f;">🧩 Якщо щось не так</div>'
+    '<p style="margin:8px 0 0;font-size:13px;line-height:1.6;color:#4a3f44;">Бракує елемента чи брак ліпучки — напишіть нам, замінимо за наш рахунок.</p>'
+    '</div></td>'),
+ "nonreturn": _returns(
+    "⚠️ <b>Цей товар поверненню та обміну не підлягає</b> — білизна, купальники, колготи й косметика за гігієнічними причинами (постанова КМУ №172). Тому <b>перевірте все при отриманні</b>.",
+    '<td width="50%" valign="top" style="padding:0 5px;"><div style="background:#FCEBEA;border-radius:12px;padding:14px 16px;">'
+    '<div style="font-size:14px;font-weight:700;color:#d06060;">Якщо товар із браком</div>'
+    '<p style="margin:8px 0 0;font-size:13px;line-height:1.6;color:#4a3f44;">Виявили заводський брак — одразу напишіть нам, розберемось і замінимо.</p>'
+    '</div></td>', steps=False),
+}
+
+def order_memo_html(items=None):
+    cat = memo_category(items)
+    top = _TOP.replace("REPLACED_HERO", f"{ASSET}/mamulya-hero.gif")
+    return (top
+            + _div("div-accept.gif") + ACCEPT[cat]
+            + _div("div-return.gif") + RETURNS[cat]
+            + _div("div-deposit.gif") + _DEPOSIT
+            + _TAIL)

@@ -8,6 +8,7 @@ try: time.tzset()
 except Exception: pass
 
 from rules import infer_stage, gifts_for, LIFECYCLE, STAGE_RULES, GIFTS, TEXTS as T, STAGE_PITCH
+from emails import order_memo_html, memo_category, MEMO_SUBJECT
 
 TOKEN = os.environ["BOT_TOKEN"]
 API = f"https://api.telegram.org/bot{TOKEN}/"
@@ -124,6 +125,21 @@ def send_photo_url(chat_id, photo_url, caption, buttons=None):
     if len(caption) > 1024:  # підпис обрізався — дошлемо хвіст окремим повідомленням
         send(chat_id, caption[1024:])
     return r
+
+MAIL_FROM = os.environ.get("MAIL_FROM", "Mamulya.lviv <info@mamulya.lviv.ua>")
+MAIL_REPLY = os.environ.get("MAIL_REPLY", "mamulyashopping@gmail.com")  # куди йдуть відповіді клієнтів
+
+def send_email(to, subject, html):
+    # транзакційний лист через Resend; тихо вимкнено, якщо нема RESEND_API_KEY
+    key = os.environ.get("RESEND_API_KEY", "")
+    if not key or "@" not in (to or ""): return False
+    data = json.dumps({"from": MAIL_FROM, "to": [to], "reply_to": MAIL_REPLY, "subject": subject, "html": html}).encode()
+    req = urllib.request.Request("https://api.resend.com/emails", data=data,
+                                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(req, timeout=20); return True
+    except Exception as e:
+        print("resend", e); return False
 
 def norm_phone(p):
     d = "".join(c for c in str(p) if c.isdigit())
@@ -1318,8 +1334,18 @@ class Hook(BaseHTTPRequestHandler):
         o = body.get("data", body)
         if isinstance(o, list): o = o[0]
         prev_status = (DB.execute("select status from orders where order_id=?", (str(o.get("id")),)).fetchone() or [None])[0]
-        save_order(o, product_names(body))
+        _ph, _items = save_order(o, product_names(body))
         abuse_check(o)
+        # памятка на email КОЛИ замовлення поїхало (statusId 4 = Відправлено), один раз, під категорію товару
+        try:
+            if int(o.get("statusId") or 0) == 4 and prev_status != 4 and STORES.get(int(o.get("sajt") or 0)) == "Mamulya.lviv":
+                c0 = (o.get("contacts") or [{}])[0] if isinstance(o.get("contacts"), list) else {}
+                emv = c0.get("email"); em = (emv[0] if isinstance(emv, list) and emv else (emv or "")).strip()
+                oid_ = str(o.get("id"))
+                if "@" in em and not DB.execute("select 1 from sent where key=?", (f"omemo:{oid_}",)).fetchone():
+                    DB.execute("insert into sent values(?,?,?)", (0, f"omemo:{oid_}", time.time())); DB.commit()
+                    threading.Thread(target=send_email, args=(em, MEMO_SUBJECT, order_memo_html(_items)), daemon=True).start()
+        except Exception as e: print("order-memo", e)
         # фіксуємо момент входу в NOREPLY (Mamulya) для авто-скасування на 7-й день
         try:
             oid_ = str(o.get("id"))
@@ -1569,6 +1595,15 @@ class Hook(BaseHTTPRequestHandler):
         if u.path == "/kpirefresh" and authed:
             threading.Thread(target=kpi_refresh, daemon=True).start()
             self.send_response(302); self.send_header("Location", f"/kpi?key={os.environ.get('ADMIN_KEY','')}"); self.end_headers(); return
+        if u.path == "/testmemo" and authed:  # тест памятки: /testmemo?key=..&to=email&cat=clothing|furniture|sling|toy|nonreturn
+            to = qs.get("to", [""])[0].strip()
+            SAMPLE = {"clothing": ["Сукня для вагітних"], "furniture": ["Стілець для годування"],
+                      "sling": ["Ерго-рюкзак"], "toy": ["Гра Lipoland на ліпучках"], "nonreturn": ["Бюстгальтер для годування"]}
+            cat = qs.get("cat", ["clothing"])[0]
+            items = SAMPLE.get(cat, SAMPLE["clothing"])
+            ok = send_email(to, MEMO_SUBJECT, order_memo_html(items))
+            self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
+            self.wfile.write((f"sent={ok} to={to} cat={memo_category(items)} from={MAIL_FROM}\n" + ("" if os.environ.get("RESEND_API_KEY") else "⚠️ RESEND_API_KEY не заданий у Render")).encode()); return
         if u.path == "/garefresh" and authed:  # лише GA4-сесії для Mamulya (без вантаження SalesDrive)
             prop = os.environ.get("GA_PROPERTY", ""); g = ga_sessions(prop); n = 0
             for ym, s in g.items():
