@@ -1,5 +1,5 @@
 # Транзакційні листи Mamulya.lviv (Resend). Памятка адаптується під категорію товару.
-MEMO_SUBJECT = "Ваше замовлення вже в дорозі! \U0001F69A Коротка памятка"
+MEMO_SUBJECT = "Ваше замовлення вже в дорозі! \U0001F69A Важлива памятка"
 # бренд-кольори з лого: кораловий #F07068 (для тексту/кнопок трохи темніший #E05A50), блиш #FCEBEA
 
 # ---- класифікація замовлення за назвами товарів (пріоритет згори вниз) ----
@@ -30,10 +30,13 @@ _TOP = r"""<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="x-apple-disable-message-reformatting"><title>Памятка Mamulya.lviv</title></head>
 <body style="margin:0;padding:0;background:#f4ece9;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#4a3f44;">
-<div style="display:none;max-height:0;overflow:hidden;opacity:0;">Ваше замовлення в дорозі 💗 Коротка памятка: як прийняти, оглянути, повернути чи обміняти.</div>
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">Збережіть цей лист: як прийняти посилку, оглянути та оформити повернення чи обмін 💗</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4ece9;"><tr><td align="center" style="padding:24px 12px;">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 2px 14px rgba(140,90,110,.10);">
-  <tr><td style="background:#ffffff;padding:26px 32px 10px;text-align:center;">
+  <tr><td style="background:#E05A50;padding:9px 16px;text-align:center;">
+    <span style="color:#ffffff;font-size:12px;font-weight:700;letter-spacing:.6px;">📌 ВАЖЛИВО · ЗБЕРЕЖІТЬ ЦЕЙ ЛИСТ</span>
+  </td></tr>
+  <tr><td style="background:#ffffff;padding:22px 32px 10px;text-align:center;">
     <img src="https://mamulya.lviv.ua/uploads/images/logo-mamulya.png" width="190" alt="Mamulya.lviv" style="width:190px;max-width:62%;height:auto;" />
   </td></tr>
   <tr><td style="padding:6px 32px 8px;text-align:center;">
