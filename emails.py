@@ -124,25 +124,25 @@ ACCEPT = {
 }
 
 # ---- секція «Повернення» під категорію ----
-_STEPS4 = ('<td width="50%" valign="top" style="padding:0 5px;"><div style="background:#FBF1EF;border-radius:12px;padding:14px 16px;">'
+_STEPS4 = ('<div style="display:inline-block;width:100%;max-width:250px;vertical-align:top;padding:4px;box-sizing:border-box;font-size:13px;text-align:left;"><div style="background:#FBF1EF;border-radius:12px;padding:14px 16px;">'
     '<div style="font-size:14px;font-weight:700;color:#3f9d6c;">↩️ Як повернути — 4 кроки</div>'
     '<ol style="margin:8px 0 0;padding-left:18px;font-size:13px;line-height:1.65;color:#4a3f44;">'
     '<li>Напишіть нам <b>до відправлення</b></li><li>Запакуйте з бірками й упаковкою</li>'
     '<li>Відправте Новою Поштою («Легке повернення» — безкоштовно)</li><li>Отримайте кошти після перевірки</li>'
-    '</ol></div></td>')
+    '</ol></div></div>')
 
 def _returns(intro, right_html, steps=True):
     left = _STEPS4 if steps else ""
-    grid = f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>{left}{right_html}</tr></table>' if right_html or steps else ""
+    grid = f'<div style="text-align:center;font-size:0;">{left}{right_html}</div>' if right_html or steps else ""
     return (f'<tr><td style="padding:18px 32px 4px;">'
             f'<div style="font-size:17px;font-weight:700;color:#E05A50;margin-bottom:10px;">🔁 Повернення та обмін — 14 днів</div>'
             f'<p style="margin:0 2px 10px;font-size:14px;line-height:1.6;color:#4a3f44;">{intro}</p>{grid}</td></tr>')
 
-_RIGHT_NONRET = ('<td width="50%" valign="top" style="padding:0 5px;"><div style="background:#FCEBEA;border-radius:12px;padding:14px 16px;">'
+_RIGHT_NONRET = ('<div style="display:inline-block;width:100%;max-width:250px;vertical-align:top;padding:4px;box-sizing:border-box;font-size:13px;text-align:left;"><div style="background:#FCEBEA;border-radius:12px;padding:14px 16px;">'
     '<div style="font-size:14px;font-weight:700;color:#d06060;">🚫 Не підлягають поверненню</div>'
     '<ul style="margin:8px 0 0;padding-left:18px;font-size:13px;line-height:1.65;color:#4a3f44;">'
     '<li>Білизна (бюстгальтери, трусики)</li><li>Купальники</li><li>Колготи, панчішно-шкарпеткові</li><li>Косметика й гігієна</li>'
-    '</ul></div></td>')
+    '</ul></div></div>')
 
 RETURNS = {
  "clothing": _returns(
@@ -150,29 +150,29 @@ RETURNS = {
     _RIGHT_NONRET) + '<tr><td style="padding:0 32px;"><p style="margin:10px 2px 0;font-size:12.5px;color:#9a8b90;">Брак з вини виробника — обмін і доставка за наш рахунок. Перелік за постановою КМУ №172.</p></td></tr>',
  "furniture": _returns(
     "Товар належної якості обміняємо або повернемо протягом <b>14 днів</b>, якщо він не використовувався, збережено вигляд, комплектність та упаковку.",
-    '<td width="50%" valign="top" style="padding:0 5px;"><div style="background:#FBF1EF;border-radius:12px;padding:14px 16px;">'
+    '<div style="display:inline-block;width:100%;max-width:250px;vertical-align:top;padding:4px;box-sizing:border-box;font-size:13px;text-align:left;"><div style="background:#FBF1EF;border-radius:12px;padding:14px 16px;">'
     '<div style="font-size:14px;font-weight:700;color:#E05A50;">📦 Великогабарит</div>'
     '<ul style="margin:8px 0 0;padding-left:18px;font-size:13px;line-height:1.65;color:#4a3f44;">'
     '<li>Зворотну доставку узгоджуємо окремо — напишіть нам</li><li>Брак чи пошкодження з нашої вини — заміна й доставка за наш рахунок</li>'
-    '</ul></div></td>'),
+    '</ul></div></div>'),
  "sling": _returns(
     "Слінг чи ерго-рюкзак можна повернути протягом <b>14 днів</b>, якщо він <b>не використовувався</b> (не прали), а бірки й упаковка на місці.",
-    '<td width="50%" valign="top" style="padding:0 5px;"><div style="background:#eef3f8;border-radius:12px;padding:14px 16px;">'
+    '<div style="display:inline-block;width:100%;max-width:250px;vertical-align:top;padding:4px;box-sizing:border-box;font-size:13px;text-align:left;"><div style="background:#eef3f8;border-radius:12px;padding:14px 16px;">'
     '<div style="font-size:14px;font-weight:700;color:#4a7fb0;">🤱 Не підійшов тип?</div>'
     '<p style="margin:8px 0 0;font-size:13px;line-height:1.6;color:#4a3f44;">Спершу напишіть нам — часто питання намотування вирішується консультацією. Брак кріплень — заміна за наш рахунок.</p>'
-    '</div></td>'),
+    '</div></div>'),
  "toy": _returns(
     "Гру належної якості обміняємо або повернемо протягом <b>14 днів</b>, якщо збережено товарний вигляд, комплектність і упаковку, а гра не була у використанні.",
-    '<td width="50%" valign="top" style="padding:0 5px;"><div style="background:#fdf4ec;border-radius:12px;padding:14px 16px;">'
+    '<div style="display:inline-block;width:100%;max-width:250px;vertical-align:top;padding:4px;box-sizing:border-box;font-size:13px;text-align:left;"><div style="background:#fdf4ec;border-radius:12px;padding:14px 16px;">'
     '<div style="font-size:14px;font-weight:700;color:#cf8a3f;">🧩 Якщо щось не так</div>'
     '<p style="margin:8px 0 0;font-size:13px;line-height:1.6;color:#4a3f44;">Бракує елемента чи брак ліпучки — напишіть нам, замінимо за наш рахунок.</p>'
-    '</div></td>'),
+    '</div></div>'),
  "nonreturn": _returns(
     "⚠️ <b>Цей товар поверненню та обміну не підлягає</b> — білизна, купальники, колготи й косметика за гігієнічними причинами (постанова КМУ №172). Тому <b>перевірте все при отриманні</b>.",
-    '<td width="50%" valign="top" style="padding:0 5px;"><div style="background:#FCEBEA;border-radius:12px;padding:14px 16px;">'
+    '<div style="display:inline-block;width:100%;max-width:250px;vertical-align:top;padding:4px;box-sizing:border-box;font-size:13px;text-align:left;"><div style="background:#FCEBEA;border-radius:12px;padding:14px 16px;">'
     '<div style="font-size:14px;font-weight:700;color:#d06060;">Якщо товар із браком</div>'
     '<p style="margin:8px 0 0;font-size:13px;line-height:1.6;color:#4a3f44;">Виявили заводський брак — одразу напишіть нам, розберемось і замінимо.</p>'
-    '</div></td>', steps=False),
+    '</div></div>', steps=False),
 }
 
 def order_memo_html(items=None):
