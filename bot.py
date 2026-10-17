@@ -1350,8 +1350,11 @@ class Hook(BaseHTTPRequestHandler):
                 emv = c0.get("email"); em = (emv[0] if isinstance(emv, list) and emv else (emv or "")).strip()
                 oid_ = str(o.get("id"))
                 if "@" in em and not DB.execute("select 1 from sent where key=?", (f"omemo:{oid_}",)).fetchone():
+                    dd = o.get("ord_delivery_data") or []
+                    d0 = dd[0] if isinstance(dd, list) and dd else {}
+                    ttn = d0.get("trackingNumber") or d0.get("declarationNumber") or d0.get("number") or ""
                     DB.execute("insert into sent values(?,?,?)", (0, f"omemo:{oid_}", time.time())); DB.commit()
-                    threading.Thread(target=send_email, args=(em, MEMO_SUBJECT, order_memo_html(_items)), daemon=True).start()
+                    threading.Thread(target=send_email, args=(em, MEMO_SUBJECT, order_memo_html(_items, ttn)), daemon=True).start()
         except Exception as e: print("order-memo", e)
         # фіксуємо момент входу в NOREPLY (Mamulya) для авто-скасування на 7-й день
         try:
@@ -1608,7 +1611,7 @@ class Hook(BaseHTTPRequestHandler):
                       "sling": ["Ерго-рюкзак"], "toy": ["Гра Lipoland на ліпучках"], "nonreturn": ["Бюстгальтер для годування"]}
             cat = qs.get("cat", ["clothing"])[0]
             items = SAMPLE.get(cat, SAMPLE["clothing"])
-            ok = send_email(to, MEMO_SUBJECT, order_memo_html(items))
+            ok = send_email(to, MEMO_SUBJECT, order_memo_html(items, "20451234567890"))
             self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
             msg = f"sent={ok} to={to} cat={memo_category(items)} from={MAIL_FROM}\n"
             if not ok: msg += ("⚠️ RESEND_API_KEY не заданий\n" if not os.environ.get("RESEND_API_KEY") else f"Resend error → {LAST_MAIL_ERR}")

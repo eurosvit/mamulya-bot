@@ -46,13 +46,14 @@ _TOP = r"""<!doctype html>
     <h1 style="margin:0 0 8px;font-size:23px;color:#3a2f34;font-weight:700;">Ваше замовлення вже в дорозі!</h1>
     <p style="margin:0;font-size:15px;line-height:1.6;color:#6e5f65;">Нова Пошта везе його до вас. Тримайте коротку памятку — як прийняти, оглянути та (за потреби) повернути.<br>Збережіть лист, щоб була під рукою.</p>
   </td></tr>
+  <!--ORDER_ITEMS-->
   <tr><td style="padding:22px 32px 4px;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FCEBEA;border-radius:14px;"><tr><td style="padding:18px 20px;">
       <div style="font-size:17px;font-weight:700;color:#E05A50;">📦 Коли чекати</div>
       <ul style="margin:10px 0 0;padding-left:20px;font-size:14.5px;line-height:1.7;color:#4a3f44;">
         <li>Нова Пошта доставляє зазвичай за <b>1–3 дні</b>.</li>
-        <li><b>Номер накладної (ТТН)</b> шукайте в SMS від Нової Пошти — за ним відстежуйте посилку в застосунку НП.</li>
       </ul>
+      <!--TTN-->
       <p style="margin:10px 0 0;font-size:13px;line-height:1.6;color:#9a8b90;">🕊 Працюємо в умовах воєнного часу — тривоги чи збої інколи затримують доставку. Якщо щось піде не так — повідомимо вас особисто.</p>
     </td></tr></table>
   </td></tr>
@@ -178,9 +179,32 @@ RETURNS = {
     '</div></div>', steps=False),
 }
 
-def order_memo_html(items=None):
+def _items_block(items):
+    items = [str(i).strip() for i in (items or []) if str(i).strip()]
+    if not items: return ""
+    lis = "".join(f'<li style="margin:2px 0;">{i}</li>' for i in items[:12])
+    return ('<tr><td style="padding:16px 32px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            'style="background:#FBF1EF;border-radius:14px;"><tr><td style="padding:16px 20px;">'
+            '<div style="font-size:16px;font-weight:700;color:#E05A50;">🛍 Ваше замовлення</div>'
+            f'<ul style="margin:8px 0 0;padding-left:20px;font-size:14px;line-height:1.6;color:#4a3f44;">{lis}</ul>'
+            '</td></tr></table></td></tr>')
+
+def _ttn_block(ttn):
+    ttn = str(ttn or "").strip()
+    if not ttn:
+        return ('<p style="margin:4px 0 0;font-size:14px;line-height:1.6;color:#4a3f44;">'
+                '📍 <b>Номер накладної (ТТН)</b> прийде в SMS від Нової Пошти — за ним відстежуйте посилку в застосунку НП.</p>')
+    track = f"https://tracking.novaposhta.ua/#/uk/?number={ttn}"
+    return (f'<div style="margin:6px 0 0;padding:12px 14px;background:#ffffff;border:1.5px solid #E05A50;border-radius:12px;text-align:center;">'
+            f'<div style="font-size:13px;color:#9a8b90;">Ваш номер накладної (ТТН)</div>'
+            f'<div style="font-size:18px;font-weight:700;color:#3a2f34;letter-spacing:1px;margin:2px 0 8px;">{ttn}</div>'
+            f'<a href="{track}" style="display:inline-block;background:#E05A50;color:#fff;text-decoration:none;font-size:13px;font-weight:600;padding:9px 20px;border-radius:9px;">📍 Відстежити посилку</a></div>')
+
+def order_memo_html(items=None, ttn=None):
     cat = memo_category(items)
-    top = _TOP.replace("REPLACED_HERO", f"{ASSET}/mamulya-hero.gif")
+    top = (_TOP.replace("REPLACED_HERO", f"{ASSET}/mamulya-hero.gif")
+                .replace("<!--ORDER_ITEMS-->", _items_block(items))
+                .replace("<!--TTN-->", _ttn_block(ttn)))
     return (top
             + _div("div-accept.gif") + ACCEPT[cat]
             + _div("div-return.gif") + RETURNS[cat]
