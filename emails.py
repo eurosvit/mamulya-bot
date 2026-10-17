@@ -37,7 +37,7 @@ _TOP = r"""<!doctype html>
     <span style="color:#ffffff;font-size:12px;font-weight:700;letter-spacing:.6px;">📌 ВАЖЛИВО · ЗБЕРЕЖІТЬ ЦЕЙ ЛИСТ</span>
   </td></tr>
   <tr><td style="background:#ffffff;padding:22px 32px 10px;text-align:center;">
-    <img src="https://mamulya.lviv.ua/uploads/images/logo-mamulya.png" width="190" alt="Mamulya.lviv" style="width:190px;max-width:62%;height:auto;" />
+    <img src="https://mamulya.lviv.ua/uploads/images/logo-mamulya-lviv.png" width="210" alt="Mamulya.lviv" style="width:210px;max-width:66%;height:auto;" />
   </td></tr>
   <tr><td style="padding:6px 32px 8px;text-align:center;">
     <img src="REPLACED_HERO" width="300" alt="" style="width:300px;max-width:82%;height:auto;margin-bottom:2px;"/>
