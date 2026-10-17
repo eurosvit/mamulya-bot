@@ -139,7 +139,8 @@ def send_email(to, subject, html):
         LAST_MAIL_ERR = "no key or bad email"; return False
     data = json.dumps({"from": MAIL_FROM, "to": [to], "reply_to": MAIL_REPLY, "subject": subject, "html": html}).encode()
     req = urllib.request.Request("https://api.resend.com/emails", data=data,
-                                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+                                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
+                                          "User-Agent": "Mozilla/5.0 (mamulya-bot)", "Accept": "application/json"})
     try:
         urllib.request.urlopen(req, timeout=20); LAST_MAIL_ERR = ""; return True
     except urllib.error.HTTPError as e:
