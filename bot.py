@@ -2,7 +2,7 @@
 ENV: BOT_TOKEN, SALESDRIVE_KEY, MEDUSA_URL, MEDUSA_KEY, DILA_CODE, BOT_NAME, PORT
 """
 import json, os, re, sqlite3, threading, time, urllib.request, urllib.parse
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 os.environ["TZ"] = "Europe/Kyiv"
 try: time.tzset()
 except Exception: pass
@@ -423,7 +423,8 @@ SOLD_F = "status not in (6,7,13,15,8)"
 ALLOWED_HOSTS = ("mamulya.lviv.ua", "modnamama.ua", "znanamama.com.ua", "antiagecosmetics.com.ua", "lipoland.fun")
 BASE_URL = os.environ.get("BASE_URL", "https://mamulya-bot.onrender.com").rstrip("/")
 # клієнтський редирект кліків: Cloudflare Worker (завжди онлайн), fallback — /r самого бота
-CLICK_BASE = os.environ.get("CLICK_BASE", "").rstrip("/") or (BASE_URL + "/r")
+# дефолт = Cloudflare Worker (завжди онлайн), щоб клієнтські кнопки НЕ залежали від бота навіть якщо env не заданий
+CLICK_BASE = os.environ.get("CLICK_BASE", "").rstrip("/") or "https://mamulya-click.aleyana-vdy-08d.workers.dev"
 
 def add_utm(url, seg):
     # обовʼязкові UTM, щоб SalesDrive бачила замовлення як кампанію «Telegram Bot»
@@ -2192,4 +2193,5 @@ if __name__ == "__main__":
     threading.Thread(target=poll, daemon=True).start()
     if OLD_TOKEN: threading.Thread(target=poll_old, daemon=True).start()
     threading.Thread(target=cron, daemon=True).start()
-    HTTPServer(("0.0.0.0", int(os.environ.get("PORT", 8080))), Hook).serve_forever()
+    # ThreadingHTTPServer: один повільний запит/розсилка не блокує /health → Render не кидає 502
+    ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", 8080))), Hook).serve_forever()
