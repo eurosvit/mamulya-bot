@@ -1345,7 +1345,7 @@ class Hook(BaseHTTPRequestHandler):
         abuse_check(o)
         # памятка на email КОЛИ замовлення поїхало (statusId 4 = Відправлено), один раз, під категорію товару
         try:
-            if int(o.get("statusId") or 0) == 4 and prev_status != 4 and STORES.get(int(o.get("sajt") or 0)) == "Mamulya.lviv":
+            if os.environ.get("MEMO_LIVE") == "1" and int(o.get("statusId") or 0) == 4 and prev_status != 4 and STORES.get(int(o.get("sajt") or 0)) == "Mamulya.lviv":
                 c0 = (o.get("contacts") or [{}])[0] if isinstance(o.get("contacts"), list) else {}
                 emv = c0.get("email"); em = (emv[0] if isinstance(emv, list) and emv else (emv or "")).strip()
                 oid_ = str(o.get("id"))
