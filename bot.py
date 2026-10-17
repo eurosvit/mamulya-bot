@@ -129,17 +129,23 @@ def send_photo_url(chat_id, photo_url, caption, buttons=None):
 MAIL_FROM = os.environ.get("MAIL_FROM", "Mamulya.lviv <info@mamulya.lviv.ua>")
 MAIL_REPLY = os.environ.get("MAIL_REPLY", "mamulyashopping@gmail.com")  # куди йдуть відповіді клієнтів
 
+LAST_MAIL_ERR = ""
+
 def send_email(to, subject, html):
     # транзакційний лист через Resend; тихо вимкнено, якщо нема RESEND_API_KEY
+    global LAST_MAIL_ERR
     key = os.environ.get("RESEND_API_KEY", "")
-    if not key or "@" not in (to or ""): return False
+    if not key or "@" not in (to or ""):
+        LAST_MAIL_ERR = "no key or bad email"; return False
     data = json.dumps({"from": MAIL_FROM, "to": [to], "reply_to": MAIL_REPLY, "subject": subject, "html": html}).encode()
     req = urllib.request.Request("https://api.resend.com/emails", data=data,
                                  headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
     try:
-        urllib.request.urlopen(req, timeout=20); return True
+        urllib.request.urlopen(req, timeout=20); LAST_MAIL_ERR = ""; return True
+    except urllib.error.HTTPError as e:
+        LAST_MAIL_ERR = f"{e.code}: {e.read().decode('utf-8','ignore')[:300]}"; print("resend", LAST_MAIL_ERR); return False
     except Exception as e:
-        print("resend", e); return False
+        LAST_MAIL_ERR = str(e); print("resend", e); return False
 
 def norm_phone(p):
     d = "".join(c for c in str(p) if c.isdigit())
@@ -1603,7 +1609,9 @@ class Hook(BaseHTTPRequestHandler):
             items = SAMPLE.get(cat, SAMPLE["clothing"])
             ok = send_email(to, MEMO_SUBJECT, order_memo_html(items))
             self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
-            self.wfile.write((f"sent={ok} to={to} cat={memo_category(items)} from={MAIL_FROM}\n" + ("" if os.environ.get("RESEND_API_KEY") else "⚠️ RESEND_API_KEY не заданий у Render")).encode()); return
+            msg = f"sent={ok} to={to} cat={memo_category(items)} from={MAIL_FROM}\n"
+            if not ok: msg += ("⚠️ RESEND_API_KEY не заданий\n" if not os.environ.get("RESEND_API_KEY") else f"Resend error → {LAST_MAIL_ERR}")
+            self.wfile.write(msg.encode()); return
         if u.path == "/garefresh" and authed:  # лише GA4-сесії для Mamulya (без вантаження SalesDrive)
             prop = os.environ.get("GA_PROPERTY", ""); g = ga_sessions(prop); n = 0
             for ym, s in g.items():
