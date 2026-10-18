@@ -1353,8 +1353,10 @@ class Hook(BaseHTTPRequestHandler):
                     dd = o.get("ord_delivery_data") or []
                     d0 = dd[0] if isinstance(dd, list) and dd else {}
                     ttn = d0.get("trackingNumber") or d0.get("declarationNumber") or d0.get("number") or ""
+                    pm_opts = {x.get("value"): (x.get("text") or "") for x in ((((body.get("meta") or {}).get("fields") or {}).get("payment_method") or {}).get("options") or [])}
+                    cod = any(k in (pm_opts.get(o.get("payment_method")) or "").lower() for k in COD_KEYWORDS) if pm_opts else None
                     DB.execute("insert into sent values(?,?,?)", (0, f"omemo:{oid_}", time.time())); DB.commit()
-                    threading.Thread(target=send_email, args=(em, MEMO_SUBJECT, order_memo_html(_items, ttn)), daemon=True).start()
+                    threading.Thread(target=send_email, args=(em, MEMO_SUBJECT, order_memo_html(_items, ttn, cod)), daemon=True).start()
         except Exception as e: print("order-memo", e)
         # фіксуємо момент входу в NOREPLY (Mamulya) для авто-скасування на 7-й день
         try:
@@ -1611,7 +1613,9 @@ class Hook(BaseHTTPRequestHandler):
                       "sling": ["Ерго-рюкзак"], "toy": ["Гра Lipoland на ліпучках"], "nonreturn": ["Бюстгальтер для годування"]}
             cat = qs.get("cat", ["clothing"])[0]
             items = SAMPLE.get(cat, SAMPLE["clothing"])
-            ok = send_email(to, MEMO_SUBJECT, order_memo_html(items, "20451234567890"))
+            pay = qs.get("pay", [""])[0]
+            cod = True if pay == "cod" else (False if pay == "prepaid" else None)
+            ok = send_email(to, MEMO_SUBJECT, order_memo_html(items, "20451234567890", cod))
             self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
             msg = f"sent={ok} to={to} cat={memo_category(items)} from={MAIL_FROM}\n"
             if not ok: msg += ("⚠️ RESEND_API_KEY не заданий\n" if not os.environ.get("RESEND_API_KEY") else f"Resend error → {LAST_MAIL_ERR}")
