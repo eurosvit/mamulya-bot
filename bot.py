@@ -945,6 +945,10 @@ def ga_sessions(prop):
     except Exception as e:
         print("ga_sessions", e); return {}
 
+# мітка магазину (KPI_STORES) → GA4 property (той самий SA-ключ має доступ до обох)
+GA_PROPS = {s: p for s, p in (("Mamulya", os.environ.get("GA_PROPERTY", "")),
+                              ("AntiAge", os.environ.get("GA_PROPERTY_ANTIAGE", "286530447"))) if p}
+
 def kpi_refresh():
     # один прохід по магазину (вкладаємось у 100 запитів/год SalesDrive): усе рахуємо локально
     if not os.environ.get("SALESDRIVE_KEY"): return
@@ -987,7 +991,7 @@ def kpi_refresh():
                        "on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated,ret_num=excluded.ret_num,ret_den=excluded.ret_den,seo_sold=excluded.seo_sold,seo_rev=excluded.seo_rev,seo_new=excluded.seo_new,seo_den=excluded.seo_den",
                        (store, ym, d["zay"], d["canc"], d["decl"], d["sold"], time.time(), len(R), len(B), d["seo_sold"], round(d["seo_rev"]), len(sn), len(sb)))
         DB.commit()
-        prop = os.environ.get("GA_PROPERTY", "") if store == "Mamulya" else ""  # мітка магазину в KPI_STORES = "Mamulya"; поки лише в нього є GA-property
+        prop = GA_PROPS.get(store, "")  # Mamulya + AntiAge мають GA4-property (той самий SA)
         if prop:
             for ym, s in ga_sessions(prop).items():
                 if ym >= "2026-01": DB.execute("update kpi_cache set seo_sess=? where store=? and ym=?", (s, store, ym))
@@ -1620,15 +1624,17 @@ class Hook(BaseHTTPRequestHandler):
             msg = f"sent={ok} to={to} cat={memo_category(items)} from={MAIL_FROM}\n"
             if not ok: msg += ("⚠️ RESEND_API_KEY не заданий\n" if not os.environ.get("RESEND_API_KEY") else f"Resend error → {LAST_MAIL_ERR}")
             self.wfile.write(msg.encode()); return
-        if u.path == "/garefresh" and authed:  # лише GA4-сесії для Mamulya (без вантаження SalesDrive)
-            prop = os.environ.get("GA_PROPERTY", ""); g = ga_sessions(prop); n = 0
-            for ym, s in g.items():
-                if ym >= "2026-01":
-                    cur = DB.execute("update kpi_cache set seo_sess=? where store='Mamulya' and ym=?", (s, ym))
-                    n += cur.rowcount
+        if u.path == "/garefresh" and authed:  # GA4-сесії для всіх GA-магазинів (без вантаження SalesDrive)
+            n = 0; res = {}
+            for st, prop in GA_PROPS.items():
+                g = ga_sessions(prop)
+                for ym, s in g.items():
+                    if ym >= "2026-01":
+                        n += DB.execute("update kpi_cache set seo_sess=? where store=? and ym=?", (s, st, ym)).rowcount
+                res[st] = len(g)
             DB.commit()
             self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
-            self.wfile.write(f"ga rows={len(g)} updated={n}\n{json.dumps(g, ensure_ascii=False)}".encode()); return
+            self.wfile.write(f"updated={n} stores={json.dumps(res, ensure_ascii=False)}".encode()); return
         if u.path == "/sched" and authed:
             sid = int(qs.get("id", ["0"])[0])
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
