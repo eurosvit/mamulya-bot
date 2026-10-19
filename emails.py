@@ -238,7 +238,7 @@ def delivered_html(name=None, total=0, cur=None, nxt=None, bot_url="https://t.me
         lvl = '<li>Ви на старті програми — ще трішки до першої знижки 💙</li>'
     if nxt:
         rem = f"{int(nxt[0]-total):,}".replace(",", " ")
-        nx = f'<li>До рівня <b>{nxt[2]}</b> лишилось <b>{rem} грн</b> → знижка {nxt[1]}%.</li>'
+        nx = f'<li>До рівня <b>{nxt[2]}</b> лишилось <b style="white-space:nowrap">{rem} грн</b> → знижка {nxt[1]}%.</li>'
     else:
         nx = '<li>Ви на максимальному рівні — найбільша знижка назавжди 💎</li>'
     cur_name = cur[2] if cur else ""
@@ -246,11 +246,11 @@ def delivered_html(name=None, total=0, cur=None, nxt=None, bot_url="https://t.me
     if has_gift:
         gift = ('<div style="font-size:16px;font-weight:700;color:#E05A50;">🎁 Ваш баланс і купони — у боті</div>'
                 '<p style="margin:8px 0 14px;font-size:14px;line-height:1.6;color:#4a3f44;">Там видно рівень, знижку та персональні купони. Загляньте 💗</p>'
-                f'<a href="{bot_url}" style="display:inline-block;background:#E05A50;color:#fff;text-decoration:none;font-size:15px;font-weight:700;padding:15px 36px;border-radius:12px;box-shadow:0 3px 10px rgba(224,90,80,.28);">Відкрити бот →</a>')
+                f'<a href="{bot_url}" style="display:inline-block;background:#E05A50;color:#fff;text-decoration:none;font-size:15px;font-weight:700;padding:15px 36px;border-radius:12px;box-shadow:0 3px 10px rgba(224,90,80,.28);">Відкрити бот</a>')
     else:
         gift = ('<div style="font-size:16px;font-weight:700;color:#E05A50;">🎁 За це замовлення вам належить подарунок</div>'
                 '<p style="margin:8px 0 14px;font-size:14px;line-height:1.6;color:#4a3f44;">Купон на наступне замовлення, безкоштовна доставка або −20% на аналізи Dila — на вибір. Заберіть у нашому боті й стежте там за балансом:</p>'
-                f'<a href="{bot_url}" style="display:inline-block;background:#E05A50;color:#fff;text-decoration:none;font-size:15px;font-weight:700;padding:15px 36px;border-radius:12px;box-shadow:0 3px 10px rgba(224,90,80,.28);">🎁 Забрати подарунок →</a>')
+                f'<a href="{bot_url}" style="display:inline-block;background:#E05A50;color:#fff;text-decoration:none;font-size:15px;font-weight:700;padding:15px 36px;border-radius:12px;box-shadow:0 3px 10px rgba(224,90,80,.28);">Забрати подарунок</a>')
     return f"""<!doctype html><html lang=uk><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"></head>
 <body translate="no" class="notranslate" style="margin:0;padding:0;background:#f4ece9;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#4a3f44;">
@@ -267,7 +267,7 @@ def delivered_html(name=None, total=0, cur=None, nxt=None, bot_url="https://t.me
     <table role=presentation width=100% cellpadding=0 cellspacing=0 style="background:#FCEBEA;border-radius:14px;"><tr><td style="padding:18px 20px;">
       <div style="font-size:17px;font-weight:700;color:#E05A50;">💳 Ваша постійна знижка</div>
       <ul style="margin:10px 0 0;padding-left:20px;font-size:14.5px;line-height:1.75;color:#4a3f44;">
-        <li>Усього покупок у Mamulya.lviv: <b>{tot} грн</b></li>{lvl}{nx}</ul>
+        <li>Усього покупок у Mamulya.lviv: <b style="white-space:nowrap">{tot} грн</b></li>{lvl}{nx}</ul>
     </td></tr></table></td></tr>
   <tr><td style="padding:16px 22px 6px;"><table role=presentation width=100% cellpadding=0 cellspacing=0 style="background:#FBF1EF;border-radius:14px;"><tr><td style="padding:18px 20px;text-align:center;">
     {gift}</td></tr></table></td></tr>
