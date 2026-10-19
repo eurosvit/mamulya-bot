@@ -20,6 +20,9 @@ def memo_category(items):
 import os as _os
 # куди Яна заллє гіфки (той самий /uploads/images, де лого); можна перевизначити env MAIL_ASSET_BASE
 ASSET = _os.environ.get("MAIL_ASSET_BASE", "https://mamulya.lviv.ua/uploads/images").rstrip("/")
+_TRACK = _os.environ.get("TRACK_BASE", "https://mamulya-bot.onrender.com").rstrip("/")
+def _px(okey):  # піксель відкриття листа (1x1)
+    return f'<img src="{_TRACK}/px?k={okey}" width="1" height="1" alt="" style="display:block;max-height:1px;opacity:0">' if okey else ""
 def _div(name, w=300):
     return (f'<tr><td style="padding:10px 22px 0;text-align:center;">'
             f'<img src="{ASSET}/{name}" width="{w}" alt="" style="width:{w}px;max-width:82%;height:auto;"/></td></tr>')
@@ -213,17 +216,18 @@ DELIVERED_SUBJECT = "Дякуємо за покупку! \U0001F497 Ваша з�
 _LEVELS = [(4500, 3, "Базовий 💙"), (9000, 5, "Смарт 🧠"), (15000, 7, "VIP 👑"), (25000, 10, "Діамант 💎")]
 
 def _lvl_row(th, pct, nm, on):
-    bg = "background:#E05A50;" if on else "background:#FBF1EF;"
-    col = "#fff" if on else "#4a3f44"
+    # приглушена драбинка-довідка (не конкурує з кнопкою): поточний рівень — легкий блиш, решта — сіре
+    bg = "background:#FCEBEA;" if on else ""
+    col = "#E05A50" if on else "#9a8b90"
     thf = f"{th:,}".replace(",", " ")
-    mark = " · ваш рівень" if on else ""
-    w = "700" if on else "600"
-    return (f'<tr><td style="padding:3px 0;"><table role=presentation width=100% cellpadding=0 cellspacing=0 style="{bg}border-radius:10px;"><tr>'
-            f'<td style="padding:9px 14px;font-size:14px;color:{col};font-weight:{w};">{nm}{mark}</td>'
-            f'<td style="padding:9px 14px;font-size:13px;color:{col};text-align:right;white-space:nowrap;">від {thf} грн · −{pct}%</td>'
+    mark = " ✓" if on else ""
+    w = "700" if on else "500"
+    return (f'<tr><td style="padding:1px 0;"><table role=presentation width=100% cellpadding=0 cellspacing=0 style="{bg}border-radius:8px;"><tr>'
+            f'<td style="padding:6px 12px;font-size:13px;color:{col};font-weight:{w};">{nm}{mark}</td>'
+            f'<td style="padding:6px 12px;font-size:12.5px;color:{col};text-align:right;white-space:nowrap;">від {thf} грн · −{pct}%</td>'
             f'</tr></table></td></tr>')
 
-def delivered_html(name=None, total=0, cur=None, nxt=None, bot_url="https://t.me/mamulyalvivbot", has_gift=False):
+def delivered_html(name=None, total=0, cur=None, nxt=None, bot_url="https://t.me/mamulyalvivbot", has_gift=False, okey=None):
     # cur/nxt = (поріг, %, назва) або None
     try: total = int(round(float(total)))
     except Exception: total = 0
@@ -242,11 +246,11 @@ def delivered_html(name=None, total=0, cur=None, nxt=None, bot_url="https://t.me
     if has_gift:
         gift = ('<div style="font-size:16px;font-weight:700;color:#E05A50;">🎁 Ваш баланс і купони — у боті</div>'
                 '<p style="margin:8px 0 14px;font-size:14px;line-height:1.6;color:#4a3f44;">Там видно рівень, знижку та персональні купони. Загляньте 💗</p>'
-                f'<a href="{bot_url}" style="display:inline-block;background:#E05A50;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 24px;border-radius:10px;">Відкрити бот</a>')
+                f'<a href="{bot_url}" style="display:inline-block;background:#E05A50;color:#fff;text-decoration:none;font-size:15px;font-weight:700;padding:15px 36px;border-radius:12px;box-shadow:0 3px 10px rgba(224,90,80,.28);">Відкрити бот →</a>')
     else:
         gift = ('<div style="font-size:16px;font-weight:700;color:#E05A50;">🎁 За це замовлення вам належить подарунок</div>'
                 '<p style="margin:8px 0 14px;font-size:14px;line-height:1.6;color:#4a3f44;">Купон на наступне замовлення, безкоштовна доставка або −20% на аналізи Dila — на вибір. Заберіть у нашому боті й стежте там за балансом:</p>'
-                f'<a href="{bot_url}" style="display:inline-block;background:#E05A50;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 24px;border-radius:10px;">🎁 Забрати подарунок</a>')
+                f'<a href="{bot_url}" style="display:inline-block;background:#E05A50;color:#fff;text-decoration:none;font-size:15px;font-weight:700;padding:15px 36px;border-radius:12px;box-shadow:0 3px 10px rgba(224,90,80,.28);">🎁 Забрати подарунок →</a>')
     return f"""<!doctype html><html lang=uk><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"></head>
 <body translate="no" class="notranslate" style="margin:0;padding:0;background:#f4ece9;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#4a3f44;">
@@ -265,11 +269,11 @@ def delivered_html(name=None, total=0, cur=None, nxt=None, bot_url="https://t.me
       <ul style="margin:10px 0 0;padding-left:20px;font-size:14.5px;line-height:1.75;color:#4a3f44;">
         <li>Усього покупок у Mamulya.lviv: <b>{tot} грн</b></li>{lvl}{nx}</ul>
     </td></tr></table></td></tr>
+  <tr><td style="padding:16px 22px 6px;"><table role=presentation width=100% cellpadding=0 cellspacing=0 style="background:#FBF1EF;border-radius:14px;"><tr><td style="padding:18px 20px;text-align:center;">
+    {gift}</td></tr></table></td></tr>
   <tr><td style="padding:14px 22px 4px;">
     <div style="font-size:16px;font-weight:700;color:#E05A50;margin:0 2px 8px;">🏆 Рівні програми</div>
     <table role=presentation width=100% cellpadding=0 cellspacing=0>{ladder}</table></td></tr>
-  <tr><td style="padding:16px 22px 6px;"><table role=presentation width=100% cellpadding=0 cellspacing=0 style="background:#FBF1EF;border-radius:14px;"><tr><td style="padding:18px 20px;text-align:center;">
-    {gift}</td></tr></table></td></tr>
   <tr><td style="padding:14px 22px 4px;">
     <table role=presentation width=100% cellpadding=0 cellspacing=0 style="background:#fbf7ee;border-radius:14px;"><tr><td style="padding:16px 20px;">
       <div style="font-size:16px;font-weight:700;color:#c79a3e;">❓ Як працює програма</div>
@@ -284,9 +288,9 @@ def delivered_html(name=None, total=0, cur=None, nxt=None, bot_url="https://t.me
     <p style="margin:6px 0 0;font-size:14px;line-height:1.7;color:#6e5f65;">Телефон / Viber / Telegram: <a href="tel:+380636324010" style="color:#E05A50;text-decoration:none;font-weight:600;white-space:nowrap;">063-632-40-10</a><br>
     Пошта: <a href="mailto:mamulyashopping@gmail.com" style="color:#E05A50;text-decoration:none;">mamulyashopping@gmail.com</a></p></td></tr>
   <tr><td style="background:#f4ece9;padding:18px 22px;text-align:center;"><div style="font-size:12px;color:#a99ba0;line-height:1.6;">Mamulya.lviv · турботливий магазин для мам 💗<br>Ви отримали цей лист, бо забрали замовлення на mamulya.lviv.ua</div></td></tr>
-</table></td></tr></table></body></html>"""
+</table></td></tr></table>{_px(okey)}</body></html>"""
 
-def order_memo_html(items=None, ttn=None, cod=None):
+def order_memo_html(items=None, ttn=None, cod=None, okey=None):
     cat = memo_category(items)
     top = (_TOP.replace("REPLACED_HERO", f"{ASSET}/mamulya-hero.gif")
                 .replace("<!--ORDER_ITEMS-->", _items_block(items))
@@ -297,4 +301,4 @@ def order_memo_html(items=None, ttn=None, cod=None):
             + _div("div-accept.gif") + ACCEPT[cat]
             + _div("div-return.gif") + RETURNS[cat] + _RETURN_NOTE
             + pay
-            + _TAIL)
+            + _TAIL).replace("</body>", _px(okey)+"</body>")

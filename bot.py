@@ -29,6 +29,7 @@ create table if not exists b2b(phone text primary key);
 create table if not exists scheduled(id integer primary key autoincrement, run_ts real, seg text, body text, btn text, done int default 0, sent int default 0, total int default 0, img text default '');
 create table if not exists sched_excl(sid int, chat_id int, primary key(sid, chat_id));
 create table if not exists clicks(pid int, chat_id int, ts real);
+create table if not exists maillog(k text primary key, kind text, email text, sent real, opened real default 0, entered real default 0, newuser int default 0);
 create table if not exists kpi_cache(store text, ym text, zay int, canc int, decl int, sold int, updated real, ret_num int default 0, ret_den int default 0, seo_sold int default 0, seo_rev int default 0, seo_new int default 0, seo_den int default 0, primary key(store, ym));
 """)
 try: DB.execute("alter table orders add column amount real default 0")
@@ -427,6 +428,13 @@ def znana_welcome(chat_id):
 
 
 def on_start(chat_id, arg):
+    _emailsrc = False
+    if arg.startswith("em") and arg[2:].isdigit():  # прийшов у бот із листа «забрали» → лог переходу
+        oid = arg[2:]; _emailsrc = True
+        newu = 0 if DB.execute("select 1 from customers where chat_id=?", (chat_id,)).fetchone() else 1
+        try: DB.execute("update maillog set entered=?, newuser=? where k=? and entered=0", (time.time(), newu, f"d{oid}")); DB.commit()
+        except Exception as e: print("mail-entered", e)
+        arg = oid  # далі — як звичайний вхід по замовленню
     if arg.startswith("ref"):
         DB.execute("insert or ignore into customers(chat_id,order_id,phone,stage,created) values(?,?,?,?,?)", (chat_id, arg, "", "unknown", time.time())); DB.commit()
         return send(chat_id, T["ref_welcome"], [[("Mamulya", "https://mamulya.lviv.ua"), ("Modnamama −300 грн", "https://modnamama.ua/?c=FRIEND300")]])
@@ -434,7 +442,7 @@ def on_start(chat_id, arg):
         return znana_welcome(chat_id)
     if arg[:1] == "c" and arg[1:].isdigit():   # підтвердження замовлення з NOREPLY-нуджа
         return confirm_in_bot(chat_id, arg[1:])
-    src = "sms" if arg.isdigit() else (arg or "direct")  # sms / qr / web / migrate / direct
+    src = "email" if _emailsrc else ("sms" if arg.isdigit() else (arg or "direct"))  # email / sms / qr / web / migrate / direct
     phone, items, store = fetch_order(arg) if arg.isdigit() else (None, [], "")
     if not phone:
         DB.execute("insert or ignore into customers(chat_id,order_id,phone,stage,created,src) values(?, '', '', 'unknown', ?, ?)", (chat_id, time.time(), src))
@@ -1409,8 +1417,9 @@ class Hook(BaseHTTPRequestHandler):
                     ttn = d0.get("trackingNumber") or d0.get("declarationNumber") or d0.get("number") or ""
                     pm_opts = {x.get("value"): (x.get("text") or "") for x in ((((body.get("meta") or {}).get("fields") or {}).get("payment_method") or {}).get("options") or [])}
                     cod = any(k in (pm_opts.get(o.get("payment_method")) or "").lower() for k in COD_KEYWORDS) if pm_opts else None
-                    DB.execute("insert into sent values(?,?,?)", (0, f"omemo:{oid_}", time.time())); DB.commit()
-                    threading.Thread(target=send_email, args=(em, MEMO_SUBJECT, order_memo_html(_items, ttn, cod)), daemon=True).start()
+                    DB.execute("insert into sent values(?,?,?)", (0, f"omemo:{oid_}", time.time()))
+                    DB.execute("insert or ignore into maillog(k,kind,email,sent) values(?,?,?,?)", (f"p{oid_}", "memo", em, time.time())); DB.commit()
+                    threading.Thread(target=send_email, args=(em, MEMO_SUBJECT, order_memo_html(_items, ttn, cod, f"p{oid_}")), daemon=True).start()
         except Exception as e: print("order-memo", e)
         # фіксуємо момент входу в NOREPLY (Mamulya) для авто-скасування на 7-й день
         try:
@@ -1451,9 +1460,10 @@ class Hook(BaseHTTPRequestHandler):
                     cur, nxt = level_of(total)
                     nm = (c0d.get("fName") or "").strip()
                     has_gift = bool(DB.execute("select 1 from gifts g join customers c on c.chat_id=g.chat_id where c.phone=? limit 1", (phd,)).fetchone())
-                    bot_url = f"https://t.me/{os.environ.get('BOT_NAME','mamulyalvivbot')}?start=delivered"
-                    DB.execute("insert into sent values(?,?,?)", (0, f"odeliv:{oidd}", time.time())); DB.commit()
-                    threading.Thread(target=send_email, args=(emd, DELIVERED_SUBJECT, delivered_html(nm, total, cur, nxt, bot_url, has_gift)), daemon=True).start()
+                    bot_url = f"https://t.me/{os.environ.get('BOT_NAME','mamulyalvivbot')}?start=em{oidd}"
+                    DB.execute("insert into sent values(?,?,?)", (0, f"odeliv:{oidd}", time.time()))
+                    DB.execute("insert or ignore into maillog(k,kind,email,sent) values(?,?,?,?)", (f"d{oidd}", "delivered", emd, time.time())); DB.commit()
+                    threading.Thread(target=send_email, args=(emd, DELIVERED_SUBJECT, delivered_html(nm, total, cur, nxt, bot_url, has_gift, f"d{oidd}")), daemon=True).start()
         except Exception as e: print("delivered-mail", e)
         # скасували замовлення, з якого клієнт уже взяв подарунки → алерт
         try:
@@ -1504,10 +1514,29 @@ class Hook(BaseHTTPRequestHandler):
             try: DB.execute("insert into clicks values(?,?,?)", (int(qs.get("p", ["0"])[0] or 0), int(qs.get("c", ["0"])[0] or 0), time.time())); DB.commit()
             except Exception as e: print("clicklog", e)
             self.send_response(204); self.end_headers(); return
+        if u.path == "/px":  # публічний: піксель відкриття листа ?k=KEY
+            k = qs.get("k", [""])[0][:40]
+            if k:
+                try: DB.execute("update maillog set opened=? where k=? and opened=0", (time.time(), k)); DB.commit()
+                except Exception as e: print("px", e)
+            self.send_response(200); self.send_header("Content-Type", "image/gif"); self.send_header("Cache-Control", "no-store"); self.end_headers()
+            self.wfile.write(base64.b64decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")); return
         if u.path == "/clicksclean" and authed:  # прибрати синтетичні тест-кліки
             nd = DB.execute("delete from clicks where chat_id in (0, 88888)").rowcount
             DB.commit()
             self.send_response(200); self.end_headers(); self.wfile.write(f"deleted {nd} synthetic clicks".encode()); return
+        if u.path == "/mailstats" and authed:  # статистика листів: відкриття + перехід у бот
+            rows = DB.execute("select kind, count(*), sum(case when opened>0 then 1 else 0 end), "
+                              "sum(case when entered>0 then 1 else 0 end), sum(newuser) from maillog group by kind order by kind").fetchall()
+            out = "📧 Статистика листів\n(лист «memo» = памятка «в дорозі», «delivered» = «забрали»)\n\n"
+            for kind, n, op, ent, nu in rows:
+                op, ent, nu = op or 0, ent or 0, nu or 0
+                out += (f"{kind}: надіслано {n}\n"
+                        f"  відкрито {op} ({op/n*100:.0f}%)\n"
+                        f"  перейшли в бот {ent} ({ent/n*100:.0f}%), з них НОВІ (догнали листом) {nu}\n\n")
+            if not rows: out += "ще нема даних"
+            self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
+            self.wfile.write(out.encode()); return
         if u.path == "/exclmen" and authed:  # виключити чоловіків із запланованої ?id=N (за іменем)
             sid = int(qs.get("id", ["0"])[0] or 0)
             seg = (DB.execute("select seg from scheduled where id=?", (sid,)).fetchone() or [""])[0]
