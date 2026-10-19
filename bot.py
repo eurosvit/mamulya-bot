@@ -148,6 +148,53 @@ def send_email(to, subject, html):
     except Exception as e:
         LAST_MAIL_ERR = str(e); print("resend", e); return False
 
+def np_track(ttn):
+    # статус посилки з публічного API Нової Пошти (ключ не потрібен)
+    try:
+        data = json.dumps({"apiKey": "", "modelName": "TrackingDocument", "calledMethod": "getStatusDocuments",
+                           "methodProperties": {"Documents": [{"DocumentNumber": ttn}]}}).encode()
+        req = urllib.request.Request("https://api.novaposhta.ua/v2.0/json/", data=data,
+                                     headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (mamulya-bot)"})
+        r = json.load(urllib.request.urlopen(req, timeout=15))
+        return (r.get("data") or [{}])[0] if r.get("success") and r.get("data") else {}
+    except Exception as e:
+        print("np_track", e); return {}
+
+def track_page(ttn, d):
+    esc = lambda s: str(s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    status = esc(d.get("Status"))
+    city = esc(d.get("CityRecipient") or d.get("WarehouseRecipient"))
+    wh = esc(d.get("WarehouseRecipient"))
+    sched = esc((d.get("ScheduledDeliveryDate") or "")[:10])
+    actual = esc((d.get("ActualDeliveryDate") or "")[:16])
+    nplink = "https://novaposhta.ua/tracking/"
+    if status:
+        rows = f'<div class=st>{status}</div>'
+        if wh: rows += f'<div class=row><span>Куди</span><b>{wh}</b></div>'
+        if actual: rows += f'<div class=row><span>Отримано</span><b>{actual}</b></div>'
+        elif sched: rows += f'<div class=row><span>Орієнтовна доставка</span><b>{sched}</b></div>'
+        body = rows
+    else:
+        body = ('<div class=st>Статус ще готується</div>'
+                '<p class=muted>Нова Пошта ще обробляє відправлення — зазвичай статус зʼявляється протягом кількох годин після відправки. Спробуйте трохи пізніше.</p>')
+    return f"""<!doctype html><html lang=uk><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1"><title>Відстеження · Mamulya.lviv</title>
+<style>:root{{color-scheme:light}}body{{margin:0;background:#f4ece9;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#3a2f34}}
+.wrap{{max-width:440px;margin:0 auto;padding:22px 16px}}.card{{background:#fff;border-radius:18px;padding:24px 22px;box-shadow:0 2px 14px rgba(140,90,110,.1);text-align:center}}
+img.logo{{width:170px;max-width:60%;height:auto;margin-bottom:6px}}.h{{font-size:15px;color:#9a8b90;margin:6px 0 2px}}
+.ttn{{font-size:22px;font-weight:700;letter-spacing:1px;margin-bottom:16px}}
+.st{{display:inline-block;background:#FCEBEA;color:#E05A50;font-weight:700;font-size:16px;padding:10px 18px;border-radius:12px;margin:4px 0 14px}}
+.row{{display:flex;justify-content:space-between;gap:12px;text-align:left;border-top:1px solid #f0e2de;padding:10px 2px;font-size:14px}}
+.row span{{color:#9a8b90}}.row b{{text-align:right;max-width:62%}}.muted{{color:#9a8b90;font-size:13.5px;line-height:1.6}}
+a.btn{{display:inline-block;margin-top:18px;background:#E05A50;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 22px;border-radius:10px}}
+.ft{{text-align:center;color:#a99ba0;font-size:12px;margin-top:16px}}</style></head>
+<body><div class=wrap><div class=card>
+<img class=logo src="https://mamulya.lviv.ua/uploads/images/logo-mamulya-lviv.png" alt="Mamulya.lviv">
+<div class=h>📦 Ваша посилка · ТТН</div><div class=ttn>{esc(ttn)}</div>
+{body}
+<div><a class=btn href="{nplink}">Детальніше на Новій Пошті</a></div>
+</div><div class=ft>Mamulya.lviv · турботливий магазин для мам 💗</div></div></body></html>"""
+
 def norm_phone(p):
     d = "".join(c for c in str(p) if c.isdigit())
     return "380" + d[-9:] if len(d) >= 9 else d
@@ -1429,6 +1476,11 @@ class Hook(BaseHTTPRequestHandler):
             try: DB.execute("insert into clicks values(?,?,?)", (pid, cid, time.time())); DB.commit()
             except Exception as e: print("click", e)
             self.send_response(302); self.send_header("Location", target); self.end_headers(); return
+        if u.path == "/track":  # публічний: брендова сторінка трекінгу (статус з API Нової Пошти)
+            ttn = "".join(c for c in qs.get("ttn", [""])[0] if c.isdigit())[:18]
+            d = np_track(ttn) if len(ttn) >= 10 else {}
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
+            self.wfile.write(track_page(ttn, d).encode()); return
         if u.path == "/clicklog":  # публічний: Worker логить клік (без редиректу)
             try: DB.execute("insert into clicks values(?,?,?)", (int(qs.get("p", ["0"])[0] or 0), int(qs.get("c", ["0"])[0] or 0), time.time())); DB.commit()
             except Exception as e: print("clicklog", e)

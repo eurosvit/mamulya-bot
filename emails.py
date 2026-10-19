@@ -199,7 +199,7 @@ def _ttn_block(ttn):
     if not ttn:
         return ('<p style="margin:4px 0 0;font-size:14px;line-height:1.6;color:#4a3f44;">'
                 '📍 <b>Номер накладної (ТТН)</b> прийде в SMS від Нової Пошти — за ним відстежуйте посилку в застосунку НП.</p>')
-    track = f"https://novaposhta.ua/tracking/?cargo_number={ttn}"
+    track = f"{_os.environ.get('TRACK_BASE', 'https://mamulya-bot.onrender.com')}/track?ttn={ttn}"
     return (f'<div style="margin:6px 0 0;padding:12px 14px;background:#ffffff;border:1.5px solid #E05A50;border-radius:12px;text-align:center;">'
             f'<div style="font-size:13px;color:#9a8b90;">Ваш номер накладної (ТТН)</div>'
             f'<div style="font-size:18px;font-weight:700;color:#3a2f34;letter-spacing:1px;margin:2px 0 8px;">{ttn}</div>'
