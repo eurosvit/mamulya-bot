@@ -1005,7 +1005,8 @@ def ga_sessions(prop):
 
 # мітка магазину (KPI_STORES) → GA4 property (той самий SA-ключ має доступ до обох)
 GA_PROPS = {s: p for s, p in (("Mamulya", os.environ.get("GA_PROPERTY", "")),
-                              ("AntiAge", os.environ.get("GA_PROPERTY_ANTIAGE", "286530447"))) if p}
+                              ("AntiAge", os.environ.get("GA_PROPERTY_ANTIAGE", "286530447")),
+                              ("Modnamama", os.environ.get("GA_PROPERTY_MODNAMAMA", "395530781"))) if p}
 
 def kpi_refresh():
     # один прохід по магазину (вкладаємось у 100 запитів/год SalesDrive): усе рахуємо локально
