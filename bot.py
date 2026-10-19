@@ -1441,7 +1441,7 @@ class Hook(BaseHTTPRequestHandler):
         except Exception as e: print("sold-open", e)
         # лист «забрали посилку»: знайомимо з лояльністю + подарунок (на кожне SOLD Mamulya, якщо MEMO_LIVE)
         try:
-            if os.environ.get("MEMO_LIVE") == "1" and int(o.get("statusId") or 0) == 5 and prev_status != 5 and STORES.get(int(o.get("sajt") or 0)) == "Mamulya.lviv":
+            if os.environ.get("DELIV_LIVE") == "1" and int(o.get("statusId") or 0) == 5 and prev_status != 5 and STORES.get(int(o.get("sajt") or 0)) == "Mamulya.lviv":
                 c0d = (o.get("contacts") or [{}])[0] if isinstance(o.get("contacts"), list) else {}
                 emv = c0d.get("email"); emd = (emv[0] if isinstance(emv, list) and emv else (emv or "")).strip()
                 phd = norm_phone((c0d.get("phone") or [""])[0] if c0d else "")
