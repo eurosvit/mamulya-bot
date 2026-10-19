@@ -1872,6 +1872,11 @@ def posts_page():
               "pregnant": "вагітність", "m0_3": "0–3 міс", "m3_6": "3–6 міс", "m6_12": "6–12 міс", "lipoland": "Lipoland",
               "Mamulya.lviv": "Mamulya", "Modnamama": "Modnamama", "Znana Mama": "Znana", "всі": "усім"}
     posts = q("select id, ts, target, text from posts order by ts desc limit 50")
+    mail_rows = ""
+    for kind, cnt, op, ent, nu in q("select kind, count(*), sum(case when opened>0 then 1 else 0 end), sum(case when entered>0 then 1 else 0 end), sum(newuser) from maillog group by kind order by kind"):
+        op, ent, nu = op or 0, ent or 0, nu or 0
+        label = {"memo": "📦 Памятка «в дорозі»", "delivered": "🎉 «Забрали» + лояльність"}.get(kind, kind)
+        mail_rows += f"<tr><td>{label}</td><td class=n>{cnt}</td><td class=n>{op} ({op/cnt*100:.0f}%)</td><td class=n>{ent} ({ent/cnt*100:.0f}%)</td><td class=n><b>{nu}</b></td></tr>"
     AT = attrib_orders()  # last-click атрибуція
     rows = ""
     tot_deliv = tot_ord = tot_rev = 0
@@ -1917,6 +1922,8 @@ def posts_page():
 <table><tr><th>Коли</th><th>Сегмент</th><th>Доставлено</th><th>Кліки</th><th>CTR</th><th>Замовлень</th><th>Конв.</th><th>Оборот</th><th>Текст</th></tr>{rows or '<tr><td>ще не було розсилок — надішліть /post у боті</td></tr>'}</table></section>
 <section class="p"><h2>Результат по магазинах <small>замовлення отримувачів розсилок, 7 днів</small></h2>
 <table><tr><th>Магазин</th><th>Замовлень</th><th>Оборот</th></tr>{store_rows}</table></section>
+<section class="p wide"><h2>📧 Авто-листи <small>відкриття приблизні (Gmail проксує картинки) · «перейшли в бот» і «нові» — точні</small></h2>
+<table><tr><th>Лист</th><th>Надіслано</th><th>Відкрито</th><th>Перейшли в бот</th><th>Нові (догнали листом)</th></tr>{mail_rows or '<tr><td>ще нема даних — зʼявиться після перших листів клієнтам</td></tr>'}</table></section>
 <section class="p wide"><h2>Заплановані <small>бот надішле сам у вказаний час · керування: <code>/schedule</code> у боті</small></h2>
 <table><tr><th>ID</th><th>Коли</th><th>Сегмент</th><th>Статус</th><th>Отримувачі</th><th>Текст</th></tr>{sched_rows or '<tr><td>нема запланованих — додайте <code>/schedule ДД.ММ ГГ:ХХ сегмент текст</code></td></tr>'}</table></section>
 </div></html>"""
