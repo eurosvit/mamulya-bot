@@ -1463,6 +1463,13 @@ class Hook(BaseHTTPRequestHandler):
             nd = DB.execute("delete from scheduled where id=? and done=0", (sid,)).rowcount
             DB.commit()
             self.send_response(200); self.end_headers(); self.wfile.write(f"deleted {nd}".encode()); return
+        if u.path == "/schededit" and authed:  # оновити ТІЛЬКИ текст запланованої ?id=N&body=... (час/сегмент/фото/кнопка лишаються)
+            sid = int(qs.get("id", ["0"])[0] or 0); body = qs.get("body", [""])[0]
+            n = DB.execute("update scheduled set body=? where id=? and done=0", (body, sid)).rowcount if (sid and body) else 0
+            DB.commit()
+            cur = DB.execute("select body from scheduled where id=?", (sid,)).fetchone()
+            self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
+            self.wfile.write((f"updated={n} id={sid}\n---\n" + (cur[0] if cur else "")).encode()); return
         if u.path == "/schedadd" and authed:  # запланувати розсилку: ?cmd=ДД.ММ ГГ:ХХ сегмент текст || кнопка
             try:
                 sid, run_ts, seg, cnt = add_scheduled(qs.get("cmd", [""])[0])
