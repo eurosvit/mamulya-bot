@@ -40,7 +40,7 @@ _TOP = r"""<!doctype html>
     <span style="color:#ffffff;font-size:12px;font-weight:700;letter-spacing:.6px;">📌 ВАЖЛИВО · ЗБЕРЕЖІТЬ ЦЕЙ ЛИСТ</span>
   </td></tr>
   <tr><td style="background:#ffffff;padding:22px 22px 10px;text-align:center;">
-    <img src="https://mamulya.lviv.ua/uploads/images/logo-mamulya-lviv.png" width="210" alt="Mamulya.lviv" style="width:210px;max-width:66%;height:auto;" />
+    <a href="https://mamulya.lviv.ua/?utm_source=email&utm_medium=email&utm_campaign=memo&utm_content=header"><img src="https://mamulya.lviv.ua/uploads/images/logo-mamulya-lviv.png" width="210" alt="Mamulya.lviv" style="width:210px;max-width:66%;height:auto;" /></a>
   </td></tr>
   <tr><td style="padding:6px 22px 8px;text-align:center;">
     <img src="REPLACED_HERO" width="300" alt="" style="width:300px;max-width:82%;height:auto;margin-bottom:2px;"/>
@@ -79,8 +79,8 @@ def _payment_block(cod):
 # ---- хвіст листа: кнопки, контакти, футер (спільне) ----
 _TAIL = r"""
   <tr><td style="padding:24px 22px 6px;text-align:center;">
-    <a href="https://mamulya.lviv.ua/dostavka-i-oplata" style="display:block;width:250px;box-sizing:border-box;background:#E05A50;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:13px 10px;border-radius:10px;margin:8px auto;text-align:center;">📦 Доставка та оплата</a>
-    <a href="https://mamulya.lviv.ua/povernennya" style="display:block;width:250px;box-sizing:border-box;background:#ffffff;color:#E05A50;text-decoration:none;font-size:14px;font-weight:600;padding:13px 10px;border-radius:10px;border:1.5px solid #E05A50;margin:8px auto;text-align:center;">🔁 Повернення та обмін</a>
+    <a href="https://mamulya.lviv.ua/dostavka-i-oplata?utm_source=email&utm_medium=email&utm_campaign=memo&utm_content=btn_dostavka" style="display:block;width:250px;box-sizing:border-box;background:#E05A50;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:13px 10px;border-radius:10px;margin:8px auto;text-align:center;">📦 Доставка та оплата</a>
+    <a href="https://mamulya.lviv.ua/povernennya?utm_source=email&utm_medium=email&utm_campaign=memo&utm_content=btn_povernennya" style="display:block;width:250px;box-sizing:border-box;background:#ffffff;color:#E05A50;text-decoration:none;font-size:14px;font-weight:600;padding:13px 10px;border-radius:10px;border:1.5px solid #E05A50;margin:8px auto;text-align:center;">🔁 Повернення та обмін</a>
   </td></tr>
   <tr><td style="padding:14px 22px 28px;text-align:center;">
     <div style="font-size:15px;font-weight:700;color:#3a2f34;">📞 Маєте питання?</div>
@@ -91,7 +91,7 @@ _TAIL = r"""
     </p>
   </td></tr>
   <tr><td style="background:#f4ece9;padding:18px 22px;text-align:center;">
-    <div style="font-size:12px;color:#a99ba0;line-height:1.6;">Mamulya.lviv · турботливий магазин для мам 💗<br>Ви отримали цей лист, бо оформили замовлення на mamulya.lviv.ua</div>
+    <div style="font-size:12px;color:#a99ba0;line-height:1.6;">Mamulya.lviv · турботливий магазин для мам 💗<br>Ви отримали цей лист, бо оформили замовлення на <a href="https://mamulya.lviv.ua/?utm_source=email&utm_medium=email&utm_campaign=memo&utm_content=footer" style="color:#a99ba0;">mamulya.lviv.ua</a></div>
   </td></tr>
 </table></td></tr></table></body></html>"""
 
@@ -258,7 +258,7 @@ def delivered_html(name=None, total=0, cur=None, nxt=None, bot_url="https://t.me
 <table role=presentation width=100% cellpadding=0 cellspacing=0 style="background:#f4ece9;"><tr><td align=center style="padding:24px 12px;">
 <table role=presentation width=600 cellpadding=0 cellspacing=0 style="max-width:600px;width:100%;background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 2px 14px rgba(140,90,110,.1);">
   <tr><td style="background:#fff;padding:24px 22px 8px;text-align:center;">
-    <img src="{ASSET}/logo-mamulya-lviv.png" width=210 alt="Mamulya.lviv" style="width:210px;max-width:66%;height:auto;"></td></tr>
+    <a href="https://mamulya.lviv.ua/?utm_source=email&utm_medium=email&utm_campaign=delivered&utm_content=header"><img src="{ASSET}/logo-mamulya-lviv.png" width=210 alt="Mamulya.lviv" style="width:210px;max-width:66%;height:auto;"></a></td></tr>
   <tr><td style="padding:4px 22px 10px;text-align:center;">
     <div style="font-size:40px;line-height:1;margin-bottom:4px;">💗</div>
     <h1 style="margin:0 0 8px;font-size:23px;color:#3a2f34;font-weight:700;">Дякуємо за покупку!</h1>
@@ -287,7 +287,7 @@ def delivered_html(name=None, total=0, cur=None, nxt=None, bot_url="https://t.me
     <div style="font-size:15px;font-weight:700;color:#3a2f34;">📞 Маєте питання?</div>
     <p style="margin:6px 0 0;font-size:14px;line-height:1.7;color:#6e5f65;">Телефон / Viber / Telegram: <a href="tel:+380636324010" style="color:#E05A50;text-decoration:none;font-weight:600;white-space:nowrap;">063-632-40-10</a><br>
     Пошта: <a href="mailto:mamulyashopping@gmail.com" style="color:#E05A50;text-decoration:none;">mamulyashopping@gmail.com</a></p></td></tr>
-  <tr><td style="background:#f4ece9;padding:18px 22px;text-align:center;"><div style="font-size:12px;color:#a99ba0;line-height:1.6;">Mamulya.lviv · турботливий магазин для мам 💗<br>Ви отримали цей лист, бо забрали замовлення на mamulya.lviv.ua</div></td></tr>
+  <tr><td style="background:#f4ece9;padding:18px 22px;text-align:center;"><div style="font-size:12px;color:#a99ba0;line-height:1.6;">Mamulya.lviv · турботливий магазин для мам 💗<br>Ви отримали цей лист, бо забрали замовлення на <a href="https://mamulya.lviv.ua/?utm_source=email&utm_medium=email&utm_campaign=delivered&utm_content=footer" style="color:#a99ba0;">mamulya.lviv.ua</a></div></td></tr>
 </table></td></tr></table>{_px(okey)}</body></html>"""
 
 def order_memo_html(items=None, ttn=None, cod=None, okey=None):
