@@ -209,6 +209,59 @@ _RETURN_NOTE = ('<tr><td style="padding:18px 22px 2px;"><p style="margin:0;font-
     '❗Пошкодження при доставці відшкодовуються <b>лише за актом</b>, складеним оператором Нової Пошти при отриманні. Без акта повернення коштів не здійснюється.'
     '</p></td></tr>')
 
+DELIVERED_SUBJECT = "Замовлення у вас! \U0001F497 А ваша знижка вже росте"
+
+def delivered_html(name=None, total=0, cur=None, nxt=None, bot_url="https://t.me/mamulyalvivbot", has_gift=False):
+    # cur/nxt = (поріг, %, назва) або None
+    hi = (name.strip() + ", в" if name and name.strip() else "В")
+    try: total = int(round(float(total)))
+    except Exception: total = 0
+    tot = f"{total:,}".replace(",", " ")
+    if cur:
+        lvl = f'<li>Ваш рівень: <b>{cur[2]}</b> — знижка <b>{cur[1]}%</b> на всі наступні покупки.</li>'
+    else:
+        lvl = '<li>Ви на старті програми — ще трішки до першої знижки 💙</li>'
+    if nxt:
+        rem = f"{int(nxt[0]-total):,}".replace(",", " ")
+        nx = f'<li>До рівня <b>{nxt[2]}</b> лишилось <b>{rem} грн</b> → знижка {nxt[1]}%.</li>'
+    else:
+        nx = '<li>Ви на максимальному рівні — найбільша знижка назавжди 💎</li>'
+    if has_gift:
+        gift = ('<div style="font-size:16px;font-weight:700;color:#E05A50;">🎁 Ваш баланс і купони — у боті</div>'
+                '<p style="margin:8px 0 14px;font-size:14px;line-height:1.6;color:#4a3f44;">Там видно рівень, знижку та персональні купони. Загляньте 💗</p>'
+                f'<a href="{bot_url}" style="display:inline-block;background:#E05A50;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 24px;border-radius:10px;">Відкрити бот</a>')
+    else:
+        gift = ('<div style="font-size:16px;font-weight:700;color:#E05A50;">🎁 За це замовлення вам належить подарунок</div>'
+                '<p style="margin:8px 0 14px;font-size:14px;line-height:1.6;color:#4a3f44;">Купон на наступне замовлення, безкоштовна доставка або −20% на аналізи Dila — на вибір. Заберіть у нашому боті й стежте там за балансом:</p>'
+                f'<a href="{bot_url}" style="display:inline-block;background:#E05A50;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 24px;border-radius:10px;">🎁 Забрати подарунок</a>')
+    return f"""<!doctype html><html lang=uk><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"></head>
+<body translate="no" class="notranslate" style="margin:0;padding:0;background:#f4ece9;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#4a3f44;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">Дякуємо, що забрали замовлення 💗 Ваша накопичувальна знижка росте — і на вас чекає подарунок.</div>
+<table role=presentation width=100% cellpadding=0 cellspacing=0 style="background:#f4ece9;"><tr><td align=center style="padding:24px 12px;">
+<table role=presentation width=600 cellpadding=0 cellspacing=0 style="max-width:600px;width:100%;background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 2px 14px rgba(140,90,110,.1);">
+  <tr><td style="background:#fff;padding:24px 22px 8px;text-align:center;">
+    <img src="{ASSET}/logo-mamulya-lviv.png" width=210 alt="Mamulya.lviv" style="width:210px;max-width:66%;height:auto;"></td></tr>
+  <tr><td style="padding:4px 22px 10px;text-align:center;">
+    <div style="font-size:40px;line-height:1;margin-bottom:4px;">🎉</div>
+    <h1 style="margin:0 0 8px;font-size:23px;color:#3a2f34;font-weight:700;">{hi}аше замовлення — у вас!</h1>
+    <p style="margin:0;font-size:15px;line-height:1.6;color:#6e5f65;">Дякуємо, що забрали посилку. Сподіваємось, усе підійшло й тішить 💗</p></td></tr>
+  <tr><td style="padding:16px 22px 4px;">
+    <table role=presentation width=100% cellpadding=0 cellspacing=0 style="background:#FCEBEA;border-radius:14px;"><tr><td style="padding:18px 20px;">
+      <div style="font-size:17px;font-weight:700;color:#E05A50;">💳 Ваша постійна знижка росте</div>
+      <ul style="margin:10px 0 0;padding-left:20px;font-size:14.5px;line-height:1.75;color:#4a3f44;">
+        <li>Усього покупок у Mamulya.lviv: <b>{tot} грн</b></li>{lvl}{nx}</ul>
+      <p style="margin:10px 0 0;font-size:13px;color:#9a8b90;">Знижка діє автоматично на всі наступні замовлення — вводити нічого не треба.</p>
+    </td></tr></table></td></tr>
+  <tr><td style="padding:16px 22px 6px;"><table role=presentation width=100% cellpadding=0 cellspacing=0 style="background:#FBF1EF;border-radius:14px;"><tr><td style="padding:18px 20px;text-align:center;">
+    {gift}</td></tr></table></td></tr>
+  <tr><td style="padding:14px 22px 26px;text-align:center;">
+    <div style="font-size:15px;font-weight:700;color:#3a2f34;">📞 Маєте питання?</div>
+    <p style="margin:6px 0 0;font-size:14px;line-height:1.7;color:#6e5f65;">Телефон / Viber / Telegram: <a href="tel:+380636324010" style="color:#E05A50;text-decoration:none;font-weight:600;white-space:nowrap;">063-632-40-10</a><br>
+    Пошта: <a href="mailto:mamulyashopping@gmail.com" style="color:#E05A50;text-decoration:none;">mamulyashopping@gmail.com</a></p></td></tr>
+  <tr><td style="background:#f4ece9;padding:18px 22px;text-align:center;"><div style="font-size:12px;color:#a99ba0;line-height:1.6;">Mamulya.lviv · турботливий магазин для мам 💗<br>Ви отримали цей лист, бо забрали замовлення на mamulya.lviv.ua</div></td></tr>
+</table></td></tr></table></body></html>"""
+
 def order_memo_html(items=None, ttn=None, cod=None):
     cat = memo_category(items)
     top = (_TOP.replace("REPLACED_HERO", f"{ASSET}/mamulya-hero.gif")

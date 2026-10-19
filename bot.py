@@ -8,7 +8,7 @@ try: time.tzset()
 except Exception: pass
 
 from rules import infer_stage, gifts_for, LIFECYCLE, STAGE_RULES, GIFTS, TEXTS as T, STAGE_PITCH
-from emails import order_memo_html, memo_category, MEMO_SUBJECT
+from emails import order_memo_html, memo_category, MEMO_SUBJECT, delivered_html, DELIVERED_SUBJECT
 
 TOKEN = os.environ["BOT_TOKEN"]
 API = f"https://api.telegram.org/bot{TOKEN}/"
@@ -1439,6 +1439,22 @@ class Hook(BaseHTTPRequestHandler):
                             DB.execute("delete from gifts where chat_id=? and gift in ('coupon','znana10')", (cid_,)); DB.commit()
                             send(cid_, T["sold_open"]); show_menu(cid_, st_)
         except Exception as e: print("sold-open", e)
+        # лист «забрали посилку»: знайомимо з лояльністю + подарунок (на кожне SOLD Mamulya, якщо MEMO_LIVE)
+        try:
+            if os.environ.get("MEMO_LIVE") == "1" and int(o.get("statusId") or 0) == 5 and prev_status != 5 and STORES.get(int(o.get("sajt") or 0)) == "Mamulya.lviv":
+                c0d = (o.get("contacts") or [{}])[0] if isinstance(o.get("contacts"), list) else {}
+                emv = c0d.get("email"); emd = (emv[0] if isinstance(emv, list) and emv else (emv or "")).strip()
+                phd = norm_phone((c0d.get("phone") or [""])[0] if c0d else "")
+                oidd = str(o.get("id"))
+                if "@" in emd and not DB.execute("select 1 from sent where key=?", (f"odeliv:{oidd}",)).fetchone():
+                    total = DB.execute("select coalesce(sum(amount),0) from orders where phone=? and status=5", (phd,)).fetchone()[0] or 0
+                    cur, nxt = level_of(total)
+                    nm = (c0d.get("fName") or "").strip()
+                    has_gift = bool(DB.execute("select 1 from gifts g join customers c on c.chat_id=g.chat_id where c.phone=? limit 1", (phd,)).fetchone())
+                    bot_url = f"https://t.me/{os.environ.get('BOT_NAME','mamulyalvivbot')}?start=delivered"
+                    DB.execute("insert into sent values(?,?,?)", (0, f"odeliv:{oidd}", time.time())); DB.commit()
+                    threading.Thread(target=send_email, args=(emd, DELIVERED_SUBJECT, delivered_html(nm, total, cur, nxt, bot_url, has_gift)), daemon=True).start()
+        except Exception as e: print("delivered-mail", e)
         # скасували замовлення, з якого клієнт уже взяв подарунки → алерт
         try:
             if int(o.get("statusId") or 0) in (6, 13) and prev_status not in (6, 13):
@@ -1673,6 +1689,14 @@ class Hook(BaseHTTPRequestHandler):
         if u.path == "/kpirefresh" and authed:
             threading.Thread(target=kpi_refresh, daemon=True).start()
             self.send_response(302); self.send_header("Location", f"/kpi?key={os.environ.get('ADMIN_KEY','')}"); self.end_headers(); return
+        if u.path == "/testdeliv" and authed:  # тест листа «забрали»: /testdeliv?key=&to=&total=12000&gift=0
+            to = qs.get("to", [""])[0].strip()
+            total = float(qs.get("total", ["12000"])[0] or 0)
+            cur, nxt = level_of(total)
+            has_gift = qs.get("gift", ["0"])[0] == "1"
+            ok = send_email(to, DELIVERED_SUBJECT, delivered_html("Оля", total, cur, nxt, f"https://t.me/{os.environ.get('BOT_NAME','mamulyalvivbot')}?start=delivered", has_gift))
+            self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
+            self.wfile.write(f"sent={ok} to={to} total={total:.0f} level={cur[2] if cur else 'нема'}\n{('' if ok else ('ключ не заданий' if not os.environ.get('RESEND_API_KEY') else LAST_MAIL_ERR))}".encode()); return
         if u.path == "/testmemo" and authed:  # тест памятки: /testmemo?key=..&to=email&cat=clothing|furniture|sling|toy|nonreturn
             to = qs.get("to", [""])[0].strip()
             SAMPLE = {"clothing": ["Сукня для вагітних"], "furniture": ["Стілець для годування"],
