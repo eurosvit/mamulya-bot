@@ -182,7 +182,8 @@ def track_page(ttn, d):
 <style>:root{{color-scheme:light}}body{{margin:0;background:#f4ece9;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#3a2f34}}
 .wrap{{max-width:440px;margin:0 auto;padding:22px 16px}}.card{{background:#fff;border-radius:18px;padding:24px 22px;box-shadow:0 2px 14px rgba(140,90,110,.1);text-align:center}}
 img.logo{{width:170px;max-width:60%;height:auto;margin-bottom:6px}}.h{{font-size:15px;color:#9a8b90;margin:6px 0 2px}}
-.ttn{{font-size:22px;font-weight:700;letter-spacing:1px;margin-bottom:16px}}
+.ttn{{font-size:22px;font-weight:700;letter-spacing:1px;margin-bottom:8px}}
+.cp{{background:#fff;border:1.5px solid #E05A50;color:#E05A50;font-size:13px;font-weight:600;padding:7px 16px;border-radius:9px;cursor:pointer;margin-bottom:14px}}
 .st{{display:inline-block;background:#FCEBEA;color:#E05A50;font-weight:700;font-size:16px;padding:10px 18px;border-radius:12px;margin:4px 0 14px}}
 .row{{display:flex;justify-content:space-between;gap:12px;text-align:left;border-top:1px solid #f0e2de;padding:10px 2px;font-size:14px}}
 .row span{{color:#9a8b90}}.row b{{text-align:right;max-width:62%}}.muted{{color:#9a8b90;font-size:13.5px;line-height:1.6}}
@@ -191,6 +192,8 @@ a.btn{{display:inline-block;margin-top:18px;background:#E05A50;color:#fff;text-d
 <body><div class=wrap><div class=card>
 <img class=logo src="https://mamulya.lviv.ua/uploads/images/logo-mamulya-lviv.png" alt="Mamulya.lviv">
 <div class=h>📦 Ваша посилка · ТТН</div><div class=ttn>{esc(ttn)}</div>
+<button class=cp type=button onclick="cp()">📋 Копіювати номер</button>
+<script>function cp(){{navigator.clipboard.writeText('{esc(ttn)}').then(function(){{var b=document.querySelector('.cp');var o=b.textContent;b.textContent='Скопійовано ✓';setTimeout(function(){{b.textContent=o}},1500)}})}}</script>
 {body}
 <div><a class=btn href="{nplink}">Детальніше на Новій Пошті</a></div>
 </div><div class=ft>Mamulya.lviv · турботливий магазин для мам 💗</div></div></body></html>"""
