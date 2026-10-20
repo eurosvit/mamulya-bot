@@ -58,6 +58,7 @@ for _c in ("seo_sold", "seo_rev", "seo_new", "seo_den", "seo_sess"):
 try: DB.execute("alter table scheduled add column img text default ''")
 except Exception: pass
 DB.execute("create table if not exists noreply(order_id text primary key, ts real)")  # коли замовлення зайшло в NOREPLY
+DB.execute("create table if not exists spir_ev(kind text, oid text, ts real)")  # трекінг офера спіруліни: open/order/paid
 DB.execute("update customers set src='migrate' where coalesce(src,'')='' and chat_id in (select chat_id from legacy)")
 DB.execute("update customers set src='sms' where coalesce(src,'')='' and coalesce(order_id,'') not in ('', 'demo', 'web', 'migrate', 'qr')")
 DB.execute("update orders set store='Mamulya.lviv' where store='Mamulya'")
@@ -1481,6 +1482,9 @@ class Hook(BaseHTTPRequestHandler):
                     p = json.loads(base64.b64decode(data).decode("utf-8", "ignore"))
                     if p.get("status") in ("success", "sandbox", "wait_accept") and float(p.get("amount") or 0) >= DEPOSIT:
                         sd_update(p.get("order_id"), {"statusId": ST_CONFIRMED})
+                        oidp = str(p.get("order_id"))
+                        if DB.execute("select 1 from spir_ev where kind='order' and oid=?", (oidp,)).fetchone() and not DB.execute("select 1 from spir_ev where kind='paid' and oid=?", (oidp,)).fetchone():
+                            DB.execute("insert into spir_ev values('paid',?,?)", (oidp, time.time())); DB.commit()
             except Exception as e: print("liqpay", e)
             self.send_response(200); self.end_headers(); return
         if urlparse(self.path).path == "/spir":  # оформлення офера спіруліни → створення замовлення → LiqPay
@@ -1498,6 +1502,7 @@ class Hook(BaseHTTPRequestHandler):
                 oid = sd_create_order(fn, ln, ph, "Укрпошта, %s, індекс %s" % (city, idx))
                 if not oid:
                     return _html(spir_page("Не вдалося оформити. Спробуйте ще раз або напишіть менеджеру."))
+                DB.execute("insert into spir_ev values('order',?,?)", (str(oid), time.time())); DB.commit()
                 d, s = liqpay_checkout(oid, SPIR["price"], "Спіруліна в таблетках 100 г — Mamulya.lviv")
                 return _html(liqpay_submit(d, s))
             except Exception as e:
@@ -1719,6 +1724,8 @@ class Hook(BaseHTTPRequestHandler):
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body); return
         if u.path == "/spir":  # публічна сторінка оформлення офера спіруліни
+            try: DB.execute("insert into spir_ev values('open','',?)", (time.time(),)); DB.commit()
+            except Exception as e: print("spir open", e)
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(spir_page()); return
         if u.path == "/stats.json" and authed:
@@ -2041,6 +2048,30 @@ def posts_page():
             st = f"⏳ очікує · <b>{eff}</b> отримувачів" + (f" <span style=color:#B8325A>(−{nex} вручну)</span>" if nex else "")
             who = f"<a href='/sched?key={AK}&id={sid}'>👁 кому піде</a>"
         sched_rows += f"<tr><td>#{sid}</td><td>{when}</td><td>{SEG_UA.get(seg, seg or 'усі')}</td><td>{st}</td><td>{who}</td><td style=max-width:420px;white-space:pre-wrap;color:#6E5F65;font-size:12.5px>{body or ''}" + ("  🔘" if btn else "") + ("  🖼" if img else "") + "</td></tr>"
+    # 🌿 трекінг спіруліни + 🔥 апгрейд знижки
+    sp_open = n("select count(*) from spir_ev where kind='open'")
+    sp_ord = n("select count(*) from spir_ev where kind='order'")
+    sp_paid = n("select count(*) from spir_ev where kind='paid'")
+    sp_conv = f"{sp_paid/sp_open*100:.0f}%" if sp_open else "—"
+    sp_rev = f"{sp_paid*SPIR['price']:,.0f}".replace(",", " ")
+    pr1 = n("select count(distinct chat_id) from sent where key='promo_r1'")
+    pr2 = n("select count(distinct chat_id) from sent where key='promo_r2'")
+    pr3 = n("select count(distinct chat_id) from sent where key='promo_r3'")
+    ml_cnt = n("select count(*) from orders where upper(coupon) like '%MALYA10%' and " + SOLD)
+    ml_rev = f"{n('select coalesce(sum(amount),0) from orders where upper(coupon) like %s and ' + SOLD, '%MALYA10%'):,.0f}".replace(",", " ")
+    lv_cnt = n("select count(*) from orders where upper(coupon) like '%LOVE7%' and " + SOLD)
+    spir_html = (f"<section class=p><h2>🌿 Спіруліна-офер <small>TOP, передоплата LiqPay</small></h2><table>"
+        f"<tr><td>Відкрили сторінку</td><td class=n>{sp_open}</td></tr>"
+        f"<tr><td>Оформили</td><td class=n>{sp_ord}</td></tr>"
+        f"<tr><td>Оплатили</td><td class=n><b>{sp_paid}</b></td></tr>"
+        f"<tr><td>Конверсія (оплата/відкриття)</td><td class=n>{sp_conv}</td></tr>"
+        f"<tr><td>Оборот, грн</td><td class=n>{sp_rev}</td></tr></table></section>"
+        f"<section class=p><h2>🔥 Апгрейд знижки 7→10% <small>попап-ліди, хто не купив</small></h2><table>"
+        f"<tr><td>Нагадування день 2 (−7%)</td><td class=n>{pr1}</td></tr>"
+        f"<tr><td>Нагадування день 5 (−7%)</td><td class=n>{pr2}</td></tr>"
+        f"<tr><td>Нагадування день 10 (−10% MALYA10)</td><td class=n>{pr3}</td></tr>"
+        f"<tr><td>Замовлень з LOVE7 (−7%)</td><td class=n>{lv_cnt}</td></tr>"
+        f"<tr><td>Замовлень з MALYA10 (−10%)</td><td class=n><b>{ml_cnt}</b> · {ml_rev} грн</td></tr></table></section>")
     cards = [("Розсилок", len(posts)), ("Доставлено", tot_deliv), ("Замовлень після (7д)", tot_ord), ("Оборот, грн", f"{tot_rev:,.0f}".replace(",", " "))]
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Розсилки — Mamulya Bot</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
@@ -2056,6 +2087,7 @@ def posts_page():
 <table><tr><th>Магазин</th><th>Замовлень</th><th>Оборот</th></tr>{store_rows}</table></section>
 <section class="p wide"><h2>📧 Авто-листи <small>відкриття приблизні (Gmail проксує картинки) · «перейшли в бот» і «нові» — точні</small></h2>
 <table><tr><th>Лист</th><th>Надіслано</th><th>Відкрито</th><th>Перейшли в бот</th><th>Нові (догнали листом)</th></tr>{mail_rows or '<tr><td>ще нема даних — зʼявиться після перших листів клієнтам</td></tr>'}</table></section>
+{spir_html}
 <section class="p wide"><h2>Заплановані <small>бот надішле сам у вказаний час · керування: <code>/schedule</code> у боті</small></h2>
 <table><tr><th>ID</th><th>Коли</th><th>Сегмент</th><th>Статус</th><th>Отримувачі</th><th>Текст</th></tr>{sched_rows or '<tr><td>нема запланованих — додайте <code>/schedule ДД.ММ ГГ:ХХ сегмент текст</code></td></tr>'}</table></section>
 </div></html>"""
