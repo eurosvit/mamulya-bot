@@ -2334,7 +2334,6 @@ def admin_page():
 {panel("Замовлення за магазинами", f"<table>{rows(stores)}</table>")}
 {panel("Клієнти за стадіями", f"<table>{rows(stages, STAGE_UA)}</table>")}
 {panel("Рівні бази", f"<table>{lvl_rows}</table>", extra=f" <small>{len(base)} клієнтів з покупками</small>")}
-{panel("«Трішки до рівня» ≤1000 грн", f"<table><tr><th>Телефон</th><th>Імʼя</th><th>Сума</th><th>До рівня</th></tr>{near_rows}</table><p style=margin:8px 0 0;font-size:12.5px><a href=/near?key={AK}>Відкрити всіх {len(near_all)} →</a></p>", extra=f" <small>топ-10 з {len(near_all)}</small>")}
 {panel("Останні клієнти", cust_filter + f"<table><tr><th>Клієнт</th><th>Телефон</th><th>Магазин</th><th>Стадія</th><th>ДН/ПДР</th><th>Джерело</th><th>Зайшла</th><th>Нагадування</th><th>🎁</th><th>Покупки</th><th>Знижка</th></tr>{cust_rows}</table>", wide=True)}
 {det("🎟 Останні видані купони", f"<table><tr><th>Код</th><th>Кому</th><th>До</th><th></th></tr>{coup_list or '<tr><td>поки нема</td></tr>'}</table>")}
 {det("⚙️ Стадія ← товар", f"<table>{cfg_stage}</table>")}
