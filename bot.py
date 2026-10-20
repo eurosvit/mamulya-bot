@@ -2065,7 +2065,7 @@ def posts_page():
     pr2 = n("select count(distinct chat_id) from sent where key='promo_r2'")
     pr3 = n("select count(distinct chat_id) from sent where key='promo_r3'")
     ml_cnt = n("select count(*) from orders where upper(coupon) like '%MALYA10%' and " + SOLD)
-    ml_rev = f"{n('select coalesce(sum(amount),0) from orders where upper(coupon) like %s and ' + SOLD, '%MALYA10%'):,.0f}".replace(",", " ")
+    ml_rev = f"{n('select coalesce(sum(amount),0) from orders where upper(coupon) like ? and ' + SOLD, '%MALYA10%'):,.0f}".replace(",", " ")
     lv_cnt = n("select count(*) from orders where upper(coupon) like '%LOVE7%' and " + SOLD)
     spir_html = (f"<section class=p><h2>🌿 Спіруліна-офер <small>TOP, передоплата LiqPay</small></h2><table>"
         f"<tr><td>Відкрили сторінку</td><td class=n>{sp_open}</td></tr>"
