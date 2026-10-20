@@ -1095,7 +1095,7 @@ def cron():
             if not cust: continue
             has_order = cust[0] and DB.execute("select 1 from orders where phone=? limit 1", (cust[0],)).fetchone()
             if has_order: continue
-            for days, key, tkey in ((2, "promo_r1", "promo_r1"), (5, "promo_r2", "promo_r2")):
+            for days, key, tkey in ((2, "promo_r1", "promo_r1"), (5, "promo_r2", "promo_r2"), (10, "promo_r3", "promo_r3")):
                 if now - (ts0 or 0) >= days * DAY and not DB.execute("select 1 from sent where chat_id=? and key=?", (chat_id, key)).fetchone():
                     try:
                         send(chat_id, T[tkey], [[("На Mamulya.lviv", add_utm("https://mamulya.lviv.ua", "promo"))]])
