@@ -1269,6 +1269,7 @@ def spir_page(err=""):
     errhtml = ('<div class=err>%s</div>' % esc(err)) if err else ""
     return ("<!doctype html><html lang=uk><head><meta charset=utf-8>"
       "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
+      "<link rel=\"icon\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23f07269'%3E%3Cpath d='M12 21s-8-5.3-8-11a4.5 4.5 0 0 1 8-2.8 4.5 4.5 0 0 1 8 2.8c0 5.7-8 11-8 11z'/%3E%3C/svg%3E\">"
       "<title>Спіруліна — спецпропозиція Mamulya.lviv</title><style>" + _SPIR_CSS + "</style></head>"
       "<body><div class=wrap><div class=card>"
       "<div class=hd><img src=\"https://mamulya.lviv.ua/uploads/images/logo-mamulya-lviv.png\" alt=\"Mamulya.lviv\"></div>"
@@ -1440,7 +1441,9 @@ def handle_confirm(oid, do, reason, test=False, token=""):
 
 def liqpay_submit(data, sign):
     # авто-POST форма на LiqPay-checkout
-    return ("<!doctype html><meta charset=utf-8><body onload=document.f.submit()>"
+    return ("<!doctype html><meta charset=utf-8>"
+            "<link rel=\"icon\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23f07269'%3E%3Cpath d='M12 21s-8-5.3-8-11a4.5 4.5 0 0 1 8-2.8 4.5 4.5 0 0 1 8 2.8c0 5.7-8 11-8 11z'/%3E%3C/svg%3E\">"
+            "<body onload=document.f.submit()>"
             '<form name=f method=POST action="https://www.liqpay.ua/api/3/checkout" accept-charset=utf-8>'
             '<input type=hidden name=data value="%s"><input type=hidden name=signature value="%s">'
             "</form>Переходимо до оплати…</body>" % (data, sign)).encode()
