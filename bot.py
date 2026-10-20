@@ -2216,7 +2216,7 @@ def admin_page():
     pr_rows += f"""<tr><td>Нагадувань про код (д2/д5)</td><td class=n>{pr_r1}/{pr_r2}</td><td></td></tr>
 <tr><td><b>Замовлень із кодом LOVE7 (по CRM)</b></td><td class=n><b>{love7}</b></td><td></td></tr>
 <tr class=sub><td>з них простежено до бота</td><td class=n>{pr_bought}</td><td></td></tr>"""
-    cust = q("select c.chat_id, coalesce(nullif(c.phone,''),'—'), coalesce((select name from names nm where nm.phone=c.phone),'—'), c.stage, c.dob, datetime(c.created,'unixepoch','localtime'), (select count(*) from gifts g where g.chat_id=c.chat_id), coalesce(nullif(c.src,''),'—'), coalesce(nullif(c.store,''),'—'), (select coalesce(sum(o.amount),0) from orders o where o.phone=c.phone and o.status not in (6,7,13,15,8)) from customers c order by c.created desc limit 100")
+    cust = q("select c.chat_id, coalesce(nullif(c.phone,''),'—'), coalesce((select name from names nm where nm.phone=c.phone),'—'), c.stage, c.dob, datetime(c.created,'unixepoch','localtime'), (select count(*) from gifts g where g.chat_id=c.chat_id), coalesce(nullif(c.src,''),'—'), coalesce(nullif(c.store,''),'—'), case when coalesce(c.phone,'')='' then 0 else (select coalesce(sum(o.amount),0) from orders o where o.phone=c.phone and o.status not in (6,7,13,15,8)) end from customers c order by c.created desc limit 100")
     CODE_UA = {"LOVE7": "LOVE7 · велком-попап −7%", "FREESHIP": "FREESHIP · безкошт. доставка", "MAMA150": "MAMA150 · −150 грн Mamulya",
                "MMBOT": "−300 грн Modnamama (персон.)", "ZNBOT": "−10% Znana (персон.)", "FRIEND300": "FRIEND300 · реферал −300"}
     coup_use = q(f"""select case when coupon like 'MMBOT%' then 'MMBOT' when coupon like 'ZNBOT%' then 'ZNBOT' else coupon end code,
@@ -2266,7 +2266,16 @@ def admin_page():
         if total >= 15000: return "⭐ "
         if total == 0: return "🆕 "
         return "💜 "
-    cust_rows = "".join(f"<tr><td>{_icon(r[9])}<a href=/client?key={AK}&id={r[0]}>{r[2] if r[2]!='—' else r[0]}</a></td><td>{r[1]}</td><td>{r[8]}</td><td>{STAGE_UA.get(r[3], r[3])}</td><td>{r[4] or '—'}</td><td>{SRC_UA.get(r[7], r[7])}</td><td class=n>{r[5][5:16]}</td><td class=n>{r[6]}</td><td class=n>{r[9]:,.0f}".replace(",", " ") + f"</td><td class=n>{_disc(r[9])}</td></tr>" for r in cust)
+    def _ccls(r):
+        return ("named" if r[2] != '—' else "noname") + (" popup" if r[7] == "promo" else "")
+    cust_rows = "".join(f"<tr class='crow {_ccls(r)}'><td>{_icon(r[9])}<a href=/client?key={AK}&id={r[0]}>{r[2] if r[2]!='—' else r[0]}</a></td><td>{r[1]}</td><td>{r[8]}</td><td>{STAGE_UA.get(r[3], r[3])}</td><td>{r[4] or '—'}</td><td>{SRC_UA.get(r[7], r[7])}</td><td class=n>{r[5][5:16]}</td><td class=n>{r[6]}</td><td class=n>{r[9]:,.0f}".replace(",", " ") + f"</td><td class=n>{_disc(r[9])}</td></tr>" for r in cust)
+    cust_filter = ("<style>.cfilt button{background:#fff;border:1px solid #e9d9d3;color:#6E5F65;border-radius:999px;padding:6px 14px;font-size:13px;cursor:pointer}.cfilt button.on{background:#C94F72;color:#fff;border-color:#C94F72}</style>"
+        "<div class=cfilt style='margin:0 0 10px;display:flex;gap:8px;flex-wrap:wrap'>"
+        "<button type=button class=on onclick=\"cf(this,'all')\">Усі</button>"
+        "<button type=button onclick=\"cf(this,'named')\">👤 Знаємо імʼя</button>"
+        "<button type=button onclick=\"cf(this,'popup')\">🪧 З попапа · ще не купили</button></div>"
+        "<script>function cf(b,f){document.querySelectorAll('.cfilt button').forEach(x=>x.classList.remove('on'));b.classList.add('on');"
+        "document.querySelectorAll('tr.crow').forEach(r=>{r.style.display=(f=='all'||r.classList.contains(f))?'':'none'})}</script>")
 
     cfg_stage = "".join(f"<tr><td>{STAGE_UA.get(st, st)}</td><td>{', '.join(kws)}</td></tr>" for st, kws in STAGE_RULES)
     cfg_gifts = "".join(f"<tr><td>{STAGE_UA.get(st, st)}</td><td>{' → '.join(g['label'] for g in gs)}</td></tr>" for st, gs in GIFTS.items())
@@ -2299,7 +2308,7 @@ def admin_page():
 {panel("Клієнти за стадіями", f"<table>{rows(stages, STAGE_UA)}</table>")}
 {panel("Рівні бази", f"<table>{lvl_rows}</table>", extra=f" <small>{len(base)} клієнтів з покупками</small>")}
 {panel("«Трішки до рівня» ≤1000 грн", f"<table><tr><th>Телефон</th><th>Імʼя</th><th>Сума</th><th>До рівня</th></tr>{near_rows}</table><p style=margin:8px 0 0;font-size:12.5px><a href=/near?key={AK}>Відкрити всіх {len(near_all)} →</a></p>", extra=f" <small>топ-10 з {len(near_all)}</small>")}
-{panel("Останні клієнти", f"<table><tr><th>Клієнт</th><th>Телефон</th><th>Магазин</th><th>Стадія</th><th>ДН/ПДР</th><th>Джерело</th><th>Зайшла</th><th>🎁</th><th>Покупки</th><th>Знижка</th></tr>{cust_rows}</table>", wide=True)}
+{panel("Останні клієнти", cust_filter + f"<table><tr><th>Клієнт</th><th>Телефон</th><th>Магазин</th><th>Стадія</th><th>ДН/ПДР</th><th>Джерело</th><th>Зайшла</th><th>🎁</th><th>Покупки</th><th>Знижка</th></tr>{cust_rows}</table>", wide=True)}
 {det("🎟 Останні видані купони", f"<table><tr><th>Код</th><th>Кому</th><th>До</th><th></th></tr>{coup_list or '<tr><td>поки нема</td></tr>'}</table>")}
 {det("⚙️ Стадія ← товар", f"<table>{cfg_stage}</table>")}
 {det("⚙️ Подарунки за стадією", f"<table>{cfg_gifts}</table>")}
