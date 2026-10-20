@@ -1538,6 +1538,32 @@ class Hook(BaseHTTPRequestHandler):
             if not rows: out += "ще нема даних"
             self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
             self.wfile.write(out.encode()); return
+        if u.path == "/popupconv" and authed:  # конверсія попапних (src=promo): скільки купили, за який час, чи через розсилку
+            total = DB.execute("select count(*) from customers where src='promo'").fetchone()[0]
+            wph = DB.execute("select count(*) from customers where src='promo' and coalesce(phone,'')!=''").fetchone()[0]
+            conv = DB.execute("select c.created, min(o.ts), c.chat_id from customers c join orders o on o.phone=c.phone and o.status=5 "
+                              "where c.src='promo' and coalesce(c.phone,'')!='' group by c.chat_id").fetchall()
+            DAY = 86400
+            buckets = {"того ж дня": 0, "1–7 днів": 0, "8–30 днів": 0, "понад 30 днів": 0}
+            assisted = 0
+            for created, first_sold, cid in conv:
+                d = (first_sold or 0) - (created or 0)
+                if time.strftime("%Y-%m-%d", time.localtime(created)) == time.strftime("%Y-%m-%d", time.localtime(first_sold)): buckets["того ж дня"] += 1
+                elif d <= 7 * DAY: buckets["1–7 днів"] += 1
+                elif d <= 30 * DAY: buckets["8–30 днів"] += 1
+                else: buckets["понад 30 днів"] += 1
+                if DB.execute("select 1 from clicks cl where cl.chat_id=? and cl.ts<? limit 1", (cid, first_sold)).fetchone(): assisted += 1
+            nc = len(conv)
+            love7 = DB.execute("select count(*), coalesce(sum(amount),0) from orders where upper(coalesce(coupon,''))='LOVE7' and status=5").fetchone()
+            out = "🪧 Конверсія попапних (SEO-попап −7%, вхід у бот)\n\n"
+            out += f"Усього попапних у боті: {total}\n  з них лишили телефон: {wph}\n  з них КУПИЛИ (отримане): {nc}"
+            out += f" ({nc/wph*100:.0f}% від тих, хто з телефоном)\n\n" if wph else "\n\n"
+            out += "⏱ Час до першої покупки:\n" + "".join(f"  {k}: {v} ({v/nc*100:.0f}%)\n" for k, v in buckets.items()) if nc else "⏱ ще нема покупок\n"
+            out += f"\n📬 З допомогою розсилки (клікнули розсилку ДО покупки): {assisted} з {nc}\n"
+            out += f"\n🎟 Замовлень з кодом LOVE7 (попап −7%), отриманих: {love7[0]} на {love7[1]:,.0f} грн".replace(",", " ")
+            out += "\n\n⚠️ Вимірюється лише по тих, хто лишив телефон у боті. Хто зайшов за кодом і не лишив телефон — покупку не прив'язати (код LOVE7 статичний). Щоб бачити ВСІХ — давати персональні коди або брати телефон на вході."
+            self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
+            self.wfile.write(out.encode()); return
         if u.path == "/exclmen" and authed:  # виключити чоловіків із запланованої ?id=N (за іменем)
             sid = int(qs.get("id", ["0"])[0] or 0)
             seg = (DB.execute("select seg from scheduled where id=?", (sid,)).fetchone() or [""])[0]
