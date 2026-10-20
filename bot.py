@@ -2293,7 +2293,7 @@ def admin_page():
         if total == 0: return "🆕 "
         return "💜 "
     def _ccls(r):
-        return ("named" if r[2] != '—' else "noname") + (" popup" if r[7] == "promo" else "")
+        return ("named" if r[2] != '—' else "noname") + (" popup" if (r[7] == "promo" and not r[9]) else "")
     cust_rows = "".join(f"<tr class='crow {_ccls(r)}'><td>{_icon(r[9])}<a href=/client?key={AK}&id={r[0]}>{r[2] if r[2]!='—' else r[0]}</a></td><td>{r[1]}</td><td>{r[8]}</td><td>{STAGE_UA.get(r[3], r[3])}</td><td>{r[4] or '—'}</td><td>{SRC_UA.get(r[7], r[7])}</td><td class=n>{r[5][5:16]}</td><td class=n>{r[6]}</td><td class=n>{r[9]:,.0f}".replace(",", " ") + f"</td><td class=n>{_disc(r[9])}</td></tr>" for r in cust)
     cust_filter = ("<style>.cfilt button{background:#fff;border:1px solid #e9d9d3;color:#6E5F65;border-radius:999px;padding:6px 14px;font-size:13px;cursor:pointer}.cfilt button.on{background:#C94F72;color:#fff;border-color:#C94F72}</style>"
         "<div class=cfilt style='margin:0 0 10px;display:flex;gap:8px;flex-wrap:wrap'>"
