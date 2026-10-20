@@ -542,6 +542,9 @@ def resolve_ids(seg):
         for part in seg.split("+"):
             if part: out.update(resolve_ids(part))
         return list(out)
+    if seg == "postpartum":
+        # постпартум/годуючі для офера спіруліни: купили товар для немовляти або годування
+        return resolve_ids("bought:годув|слінг|ерго|кокон|прикорм|тарілк|стільч|смоктання")
     if seg.startswith("bought:"):
         # хто купував товар за ключем(ами через |): bought:вагітн|годуюч
         kws = [k for k in seg[7:].split("|") if k]
@@ -2008,7 +2011,7 @@ def posts_page():
     n = lambda sql, *a: DB.execute(sql, a).fetchone()[0]
     SOLD = "status not in (6,7,13,15,8)"
     SEG_UA = {"nobuy": "🆕 без покупок", "buyers": "💜 покупці", "vip": "⭐ VIP", "sleeping": "😴 сплячі", "near": "✨ за крок до рівня", "doman": "🧒 Домана/Ліполенд",
-              "pregnant": "вагітність", "m0_3": "0–3 міс", "m3_6": "3–6 міс", "m6_12": "6–12 міс", "lipoland": "Lipoland",
+              "pregnant": "вагітність", "m0_3": "0–3 міс", "m3_6": "3–6 міс", "m6_12": "6–12 міс", "lipoland": "Lipoland", "postpartum": "🤱 постпартум",
               "Mamulya.lviv": "Mamulya", "Modnamama": "Modnamama", "Znana Mama": "Znana", "всі": "усім"}
     posts = q("select id, ts, target, text from posts order by ts desc limit 50")
     mail_rows = ""
