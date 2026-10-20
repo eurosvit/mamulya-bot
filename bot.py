@@ -520,6 +520,10 @@ def track_url(url, pid, cid, seg):
     # UTM + редирект через Worker (CLICK_BASE) або /r бота; клієнтський лінк не залежить від рестартів бота
     url = add_utm(url, seg)
     if not url.startswith("http"): return url
+    # лінки на сам бот (напр. /spir) не ганяємо через воркер: його нема в allowlist воркера,
+    # і сенсу нема — сторінку хостить сам бот. Віддаємо прямий лінк.
+    if urllib.parse.urlparse(url).hostname == urllib.parse.urlparse(BASE_URL).hostname:
+        return url
     return f"{CLICK_BASE}?p={pid}&c={cid}&u={urllib.parse.quote(url, safe='')}"
 
 def parse_button(body):
