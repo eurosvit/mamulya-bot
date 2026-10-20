@@ -1150,7 +1150,19 @@ def cron():
                         send(chat_id, T[key])
                         DB.execute("insert into sent values(?,?,?)", (chat_id, key, now))
                     except Exception as e: print("giftrem", e)
-                    break  # максимум один дотик за прогін
+                    break
+        DB.commit()
+        # близько до рівня: нагадування «лишилось X до знижки» — до 3 дотиків, раз на 10 днів, поки не перейде рівень
+        try:
+            for cid in resolve_ids("near"):
+                row = DB.execute("select count(*), coalesce(max(ts),0) from sent where chat_id=? and key like 'nearlvl_%'", (cid,)).fetchone()
+                cnt, last = row[0] or 0, row[1] or 0
+                if cnt >= 3 or (cnt > 0 and now - last < 10 * DAY): continue
+                try:
+                    send(cid, personalize(T["nearlvl"], cid), [[("На Mamulya.lviv", add_utm("https://mamulya.lviv.ua", "nearlvl"))]])
+                    DB.execute("insert into sent values(?,?,?)", (cid, f"nearlvl_{cnt+1}", now))
+                except Exception as e: print("nearlvl", e)
+        except Exception as e: print("nearlvl-block", e)
         DB.commit()
         for sid, seg, body, btn_s, img in DB.execute("select id,seg,body,btn,coalesce(img,'') from scheduled where done=0 and run_ts<=?", (now,)).fetchall():
             btn = tuple(btn_s.split("|", 1)) if btn_s else None
