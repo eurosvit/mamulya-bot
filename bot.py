@@ -1213,6 +1213,74 @@ def sd_update(order_id, data):
         {"Form-Api-Key": os.environ.get("SALESDRIVE_KEY", ""), "Content-Type": "application/json"})
     return json.load(urllib.request.urlopen(req, timeout=20))
 
+# ---- Спіруліна-офер (TOP, дроп, передоплата LiqPay, доставка Укрпошта) ----
+# КРИТИЧНО (перевірено): products[].id = ID товару в КАТАЛОЗІ (матч по ID, не по SKU!).
+# top011 = ID «Спіруліна в таблетках Top 100 г». Без id — товар тихо випадає.
+SPIR = {"id": "top011", "sku": "top002", "name": "Спіруліна в таблетках Top 100 г", "price": 500}
+
+def sd_create_order(fname, lname, phone, addr_text):
+    """Створює замовлення в SalesDrive через POST /handler/. Повертає orderId або None."""
+    payload = {
+        "getResultData": 1,
+        "fName": fname, "lName": lname, "phone": phone,
+        "products": [{"id": SPIR["id"], "name": SPIR["name"], "sku": SPIR["sku"],
+                      "costPerItem": SPIR["price"], "amount": 1}],
+        "shipping_method": "id_16",                               # Укрпошта
+        "shipping_address": addr_text,
+        "payment_method": "Оплата онлайн Liqpay (0% комісії)",
+        "con_conmagazin": "id_52",                                # магазин Mamulya
+        "sajt": "https://mamulya.lviv.ua/",
+        "utmSource": "telegram", "utmMedium": "bot", "utmCampaign": "spirulina_offer",
+        "comment": "Спіруліна-офер (бот). Передоплата онлайн LiqPay. Дроп TOP Superfoods.",
+        "externalId": "spir-%d" % int(time.time()),
+    }
+    body = json.dumps(payload, ensure_ascii=False).encode()
+    req = urllib.request.Request("https://aleyana.salesdrive.me/handler/", body,
+        {"Form-Api-Key": os.environ.get("SALESDRIVE_KEY", ""), "Content-Type": "application/json"})
+    r = json.load(urllib.request.urlopen(req, timeout=25))
+    return (r.get("data") or {}).get("orderId") if r.get("success") else None
+
+_SPIR_CSS = ("*{box-sizing:border-box}body{margin:0;background:#faf7f5;font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#1a1a1a}"
+ ".wrap{max-width:420px;margin:0 auto;padding:16px}.card{background:#fff;border-radius:16px;border:1px solid #eee;overflow:hidden}"
+ ".hd{padding:20px 18px 14px;text-align:center;border-bottom:1px solid #f0f0f0}.hd img{height:44px}.bd{padding:18px}"
+ ".badge{display:inline-block;background:#FCEBEA;color:#E05A50;font-size:12px;font-weight:700;letter-spacing:.4px;padding:5px 12px;border-radius:20px;margin-bottom:12px}"
+ ".q{font-size:18px;font-weight:600;margin:0 0 14px}"
+ ".ord{background:#faf7f5;border-radius:12px;padding:14px;margin:0 0 16px;display:flex;gap:12px;align-items:center}"
+ ".ord img{width:56px;height:82px;object-fit:contain;border-radius:8px;background:#fff}"
+ ".ord .nm{font-size:17px;font-weight:700;color:#E05A50;line-height:1.25}.ord .sub{font-size:12.5px;color:#9a8b90;margin-top:4px}"
+ ".prow{display:flex;justify-content:space-between;font-size:13.5px;color:#555;padding:4px 0}"
+ ".prow .old{color:#b4b2a9;text-decoration:line-through;margin-right:8px}.prow .free{color:#1d9e75;font-weight:600}"
+ ".tot{display:flex;justify-content:space-between;font-size:17px;font-weight:700;border-top:1px solid #eee;margin-top:6px;padding-top:10px}.tot .c{color:#E05A50}"
+ "label{display:block;font-size:12.5px;color:#9a8b90;margin:12px 0 5px;font-weight:600}"
+ "input{width:100%;height:46px;border:1px solid #e6ddd9;border-radius:11px;padding:0 13px;font-size:15px}input:focus{outline:0;border-color:#E05A50}"
+ ".bp{display:block;width:100%;height:54px;border:0;border-radius:13px;background:#E05A50;color:#fff;font-size:16px;font-weight:700;margin:20px 0 10px;cursor:pointer}"
+ ".sec{font-size:12px;color:#9a8b90;text-align:center;line-height:1.5}.err{background:#fdecea;color:#c0392b;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px}"
+ ".ft{padding:12px 18px;border-top:1px solid #f0f0f0;font-size:12.5px;color:#9a8b90;text-align:center}")
+
+def spir_page(err=""):
+    errhtml = ('<div class=err>%s</div>' % esc(err)) if err else ""
+    return ("<!doctype html><html lang=uk><head><meta charset=utf-8>"
+      "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
+      "<title>Спіруліна — спецпропозиція Mamulya.lviv</title><style>" + _SPIR_CSS + "</style></head>"
+      "<body><div class=wrap><div class=card>"
+      "<div class=hd><img src=\"https://mamulya.lviv.ua/uploads/images/logo-mamulya-lviv.png\" alt=\"Mamulya.lviv\"></div>"
+      "<div class=bd><div class=badge>СПЕЦПРОПОЗИЦІЯ · ДІЄ 7 ДНІВ</div><div class=q>Оформлення</div>" + errhtml +
+      "<div class=ord><img src=\"https://media.top-superfoods.com/pages/home/products/spirulina-tablets.webp\" alt=\"\">"
+      "<div><div class=nm>Спіруліна в таблетках, 100&nbsp;г</div><div class=sub>турбота про маму після пологів</div></div></div>"
+      "<div class=prow><span>Ціна</span><span><span class=old>540&nbsp;грн</span>500&nbsp;грн</span></div>"
+      "<div class=prow><span>Доставка Укрпоштою</span><span class=free>безкоштовно</span></div>"
+      "<div class=tot><span>Разом</span><span class=c>500&nbsp;грн</span></div>"
+      "<form method=post action=/spir>"
+      "<label>Ім'я</label><input name=fName required>"
+      "<label>Прізвище</label><input name=lName required>"
+      "<label>Телефон</label><input name=phone inputmode=tel placeholder=\"+380\" required>"
+      "<label>Поштовий індекс</label><input name=index inputmode=numeric placeholder=\"напр. 79000\" required>"
+      "<label>Місто / село</label><input name=city required>"
+      "<label>Відділення Укрпошти</label><input name=warehouse placeholder=\"напр. №1\" required>"
+      "<button class=bp type=submit>Оплатити 500&nbsp;грн</button></form>"
+      "<div class=sec>🔒 Оплата через захищену сторінку LiqPay.<br>Після оплати оформимо відправку Укрпоштою.</div>"
+      "</div><div class=ft>Mamulya.lviv</div></div></div></body></html>").encode()
+
 def sd_order(order_id):
     # SalesDrive фільтрує id лише діапазоном from/to — для точного збігу задаємо однакові межі
     url = "https://aleyana.salesdrive.me/api/order/list/?filter[id][from]=%s&filter[id][to]=%s" % (order_id, order_id)
@@ -1416,6 +1484,25 @@ class Hook(BaseHTTPRequestHandler):
                         sd_update(p.get("order_id"), {"statusId": ST_CONFIRMED})
             except Exception as e: print("liqpay", e)
             self.send_response(200); self.end_headers(); return
+        if urlparse(self.path).path == "/spir":  # оформлення офера спіруліни → створення замовлення → LiqPay
+            raw = self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0).decode("utf-8", "ignore")
+            f = {k: (v[0] if v else "") for k, v in parse_qs(raw).items()}
+            def _html(b):
+                self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(b)
+            fn = f.get("fName", "").strip(); ln = f.get("lName", "").strip()
+            ph = f.get("phone", "").strip(); idx = "".join(c for c in f.get("index", "") if c.isdigit())
+            city = f.get("city", "").strip(); wh = f.get("warehouse", "").strip()
+            if not (fn and len("".join(c for c in ph if c.isdigit())) >= 10 and len(idx) == 5 and city and wh):
+                return _html(spir_page("Заповніть усі поля. Телефон і 5-значний індекс — коректно."))
+            try:
+                oid = sd_create_order(fn, ln, ph, "%s, %s, Відділення Укрпошти %s" % (idx, city, wh))
+                if not oid:
+                    return _html(spir_page("Не вдалося оформити. Спробуйте ще раз або напишіть менеджеру."))
+                d, s = liqpay_checkout(oid, SPIR["price"], "Спіруліна в таблетках 100 г — Mamulya.lviv")
+                return _html(liqpay_submit(d, s))
+            except Exception as e:
+                print("spir", e); return _html(spir_page("Технічна помилка. Напишіть менеджеру, будь ласка."))
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or b"{}"))
         o = body.get("data", body)
         if isinstance(o, list): o = o[0]
@@ -1632,6 +1719,9 @@ class Hook(BaseHTTPRequestHandler):
                 body = info_page("Некоректне посилання.")
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body); return
+        if u.path == "/spir":  # публічна сторінка оформлення офера спіруліни
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(spir_page()); return
         if u.path == "/stats.json" and authed:
             LAUNCH = 1789045200
             def n(q, *a): return DB.execute(q, a).fetchone()[0]
