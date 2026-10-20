@@ -1194,6 +1194,11 @@ ST_NOREPLY, ST_CONFIRMED, ST_CANCELLED = 10, 2, 13
 DEPOSIT = 200
 # усі варіанти наложки/післяплати (різні назви одного) — потребують завдатку 200 грн
 COD_KEYWORDS = ("наклад", "наложен", "післяплат", "при отриман", "при доставц")
+
+def is_cod(pm_val, pm_text):
+    # наложка = ключове слово у способі оплати АБО порожній спосіб.
+    # Онлайн-оплата завжди проставляє payment_method, тож порожнє = не передоплата = наложка.
+    return (not pm_val) or any(k in (pm_text or "").lower() for k in COD_KEYWORDS)
 PHONE_HREF, PHONE_TXT = "+380636324010", "+380 63 632 40 10"
 # видимі клієнту причини -> rejectionReasonId у SalesDrive (0 = без причини)
 DECLINE_REASONS = [("Вже придбав(ла) в іншому місці", 104),
@@ -1228,8 +1233,7 @@ def sd_order(order_id):
     o["_coupon"] = (m.group(1), float(m.group(2))) if m else None
     pm_opts = {x.get("value"): (x.get("text") or "") for x in
                ((((resp.get("meta") or {}).get("fields") or {}).get("payment_method") or {}).get("options") or [])}
-    pm_text = (pm_opts.get(o.get("payment_method")) or "").lower()
-    o["_cod"] = any(k in pm_text for k in COD_KEYWORDS)
+    o["_cod"] = is_cod(o.get("payment_method"), pm_opts.get(o.get("payment_method")))
     return o
 
 def liqpay_sign(data):
@@ -1429,7 +1433,7 @@ class Hook(BaseHTTPRequestHandler):
                     d0 = dd[0] if isinstance(dd, list) and dd else {}
                     ttn = d0.get("trackingNumber") or d0.get("declarationNumber") or d0.get("number") or ""
                     pm_opts = {x.get("value"): (x.get("text") or "") for x in ((((body.get("meta") or {}).get("fields") or {}).get("payment_method") or {}).get("options") or [])}
-                    cod = any(k in (pm_opts.get(o.get("payment_method")) or "").lower() for k in COD_KEYWORDS) if pm_opts else None
+                    cod = is_cod(o.get("payment_method"), pm_opts.get(o.get("payment_method")))
                     DB.execute("insert into sent values(?,?,?)", (0, f"omemo:{oid_}", time.time()))
                     DB.execute("insert or ignore into maillog(k,kind,email,sent) values(?,?,?,?)", (f"p{oid_}", "memo", em, time.time())); DB.commit()
                     threading.Thread(target=send_email, args=(em, MEMO_SUBJECT, order_memo_html(_items, ttn, cod, f"p{oid_}")), daemon=True).start()
