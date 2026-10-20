@@ -1274,9 +1274,8 @@ def spir_page(err=""):
       "<label>Ім'я</label><input name=fName required>"
       "<label>Прізвище</label><input name=lName required>"
       "<label>Телефон</label><input name=phone inputmode=tel placeholder=\"+380\" required>"
-      "<label>Поштовий індекс</label><input name=index inputmode=numeric placeholder=\"напр. 79000\" required>"
       "<label>Місто / село</label><input name=city required>"
-      "<label>Відділення Укрпошти</label><input name=warehouse placeholder=\"напр. №1\" required>"
+      "<label>Поштовий індекс <span style=color:#b4b2a9>(визначає відділення Укрпошти)</span></label><input name=index inputmode=numeric placeholder=\"напр. 43021\" required>"
       "<button class=bp type=submit>Оплатити 500&nbsp;грн</button></form>"
       "<div class=sec>🔒 Оплата через захищену сторінку LiqPay.<br>Після оплати оформимо відправку Укрпоштою.</div>"
       "</div><div class=ft>Mamulya.lviv</div></div></div></body></html>").encode()
@@ -1492,11 +1491,11 @@ class Hook(BaseHTTPRequestHandler):
                 self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(b)
             fn = f.get("fName", "").strip(); ln = f.get("lName", "").strip()
             ph = f.get("phone", "").strip(); idx = "".join(c for c in f.get("index", "") if c.isdigit())
-            city = f.get("city", "").strip(); wh = f.get("warehouse", "").strip()
-            if not (fn and len("".join(c for c in ph if c.isdigit())) >= 10 and len(idx) == 5 and city and wh):
+            city = f.get("city", "").strip()
+            if not (fn and ln and len("".join(c for c in ph if c.isdigit())) >= 10 and len(idx) == 5 and city):
                 return _html(spir_page("Заповніть усі поля. Телефон і 5-значний індекс — коректно."))
             try:
-                oid = sd_create_order(fn, ln, ph, "%s, %s, Відділення Укрпошти %s" % (idx, city, wh))
+                oid = sd_create_order(fn, ln, ph, "Укрпошта, %s, індекс %s" % (city, idx))
                 if not oid:
                     return _html(spir_page("Не вдалося оформити. Спробуйте ще раз або напишіть менеджеру."))
                 d, s = liqpay_checkout(oid, SPIR["price"], "Спіруліна в таблетках 100 г — Mamulya.lviv")
