@@ -118,12 +118,15 @@ def send_photo(chat_id, path, caption):
     return json.load(urllib.request.urlopen(req, timeout=30))
 
 def send_photo_url(chat_id, photo_url, caption, buttons=None):
-    # ponytail: фото за URL — Telegram сам тягне; для розсилок замість завантаження файлу
-    kw = dict(chat_id=chat_id, photo=photo_url, caption=caption[:1024], parse_mode="HTML")
+    # ponytail: фото/гіф за URL — Telegram сам тягне; .gif шлемо як анімацію (sendAnimation), інакше піде перший кадр
+    is_gif = photo_url.lower().split("?")[0].endswith(".gif")
+    method = "sendAnimation" if is_gif else "sendPhoto"
+    kw = dict(chat_id=chat_id, caption=caption[:1024], parse_mode="HTML")
+    kw["animation" if is_gif else "photo"] = photo_url
     if buttons:
         kw["reply_markup"] = {"inline_keyboard": [[
             {"text": t, **({"url": d} if d.startswith("http") else {"callback_data": d})} for t, d in row] for row in buttons]}
-    r = tg("sendPhoto", **kw)
+    r = tg(method, **kw)
     if len(caption) > 1024:  # підпис обрізався — дошлемо хвіст окремим повідомленням
         send(chat_id, caption[1024:])
     return r
