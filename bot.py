@@ -724,6 +724,9 @@ def on_text(chat_id, text):
             f"🎟 Активних купонів: {live}\n"
             f"🎟 Вільних кодів −150: {n('select count(*) from pool where chat_id is null')}\n"
             f"📦 Замовлень у базі: {n('select count(*) from orders')}")
+    if chat_id in ADMINS and t == "/testspir":
+        send_photo_url(chat_id, SPIR_BANNER, T["spir_offer"], [[("Оформити за 500 грн", BASE_URL + "/spir")]])
+        return send(chat_id, "👆 Так виглядатиме авто-офер спіруліни клієнту.\nУвімкнути розсилку всім постпартум: <code>SPIR_OFFER_LIVE=1</code> у Render.")
     if chat_id in ADMINS and t == "/post":
         return send(chat_id, "Розсилка. Формат: <code>/post &lt;сегмент&gt; текст</code>\n\nСегменти:\n• <b>(без сегмента)</b> — усім у боті\n• <b>nobuy</b> — ще без покупок (дотиск до першої)\n• <b>buyers</b> — з покупками\n• <b>vip</b> — рівень VIP+ (від 15 000)\n• <b>sleeping</b> — купували, але тиша 60+ днів\n• <b>near</b> — лишилось ≤1000 грн до наступного рівня\n• <b>doman</b> — малюки за віком + минулі покупці Ліполенд\n• <b>pregnant/m0_3/m3_6/m6_12/lipoland</b> — за стадією\n• <b>mamulya/modnamama/znana</b> — за магазином\n\n<b>Кнопка</b> (необовʼязково): додайте в кінці <code>|| текст | посилання</code> або ярлик магазину <code>|| mamulya</code> (modnamama/znana/antiage).\n<b>Фото</b> (необовʼязково): додайте в кінці <code>@img https://…jpg</code> (після кнопки).\n\n<b>Персоналізація</b> — підставляються під кожного:\n<code>{імя}</code> імʼя (або «Мамо»), <code>{сума}</code> всього покупок, <code>{залишок}</code> грн до наступного рівня, <code>{рівень}</code> % наступного рівня, <code>{поточна}</code> % поточної знижки.\nНапр.: <code>/post near {імя}, лишилось {залишок} грн до знижки {рівень} 💗</code>\n\nПриклади:\n<code>/post nobuy Знижка −7% чекає 💗 || mamulya</code>\n<code>/post doman Новинка! || mamulya @img https://mamulya.lviv.ua/…png</code>\n\n⏰ Запланувати: <code>/schedule 07.10 11:00 nobuy текст || mamulya</code> · список/скасування: <code>/schedule</code>")
     if chat_id in ADMINS and (t == "/schedule" or t.startswith("/schedule ")):
@@ -1180,6 +1183,7 @@ def cron():
         # 🌿 Спіруліна-офер постпартум-клієнтам: ~10 днів після покупки, один раз (вмикається env SPIR_OFFER_LIVE=1)
         if os.environ.get("SPIR_OFFER_LIVE") == "1":
             try:
+                sn = 0
                 for cid in resolve_ids("postpartum"):
                     if DB.execute("select 1 from sent where chat_id=? and key='spiroffer'", (cid,)).fetchone(): continue
                     pr = DB.execute("select phone from customers where chat_id=?", (cid,)).fetchone()
@@ -1190,9 +1194,13 @@ def cron():
                     try:
                         send_photo_url(cid, SPIR_BANNER, T["spir_offer"], [[("Оформити за 500 грн", BASE_URL + "/spir")]])
                         DB.execute("insert into sent values(?,?,?)", (cid, "spiroffer", now))
-                        DB.execute("insert into spir_ev values('sent','',?)", (now,))
+                        DB.execute("insert into spir_ev values('sent','',?)", (now,)); sn += 1
                     except Exception as e: print("spiroffer", e)
                 DB.commit()
+                if sn:
+                    for a in ADMINS:
+                        try: send(a, f"🌿 Авто-офер спіруліни надіслано: <b>{sn}</b> клієнтам")
+                        except Exception: pass
             except Exception as e: print("spiroffer-block", e)
         for sid, seg, body, btn_s, img in DB.execute("select id,seg,body,btn,coalesce(img,'') from scheduled where done=0 and run_ts<=?", (now,)).fetchall():
             btn = tuple(btn_s.split("|", 1)) if btn_s else None
