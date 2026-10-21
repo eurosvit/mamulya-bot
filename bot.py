@@ -505,6 +505,7 @@ SHOP_BTN = {"mamulya": ("🛍 На Mamulya.lviv", "https://mamulya.lviv.ua"),
             "antiage": ("🛍 На AntiAge", "https://antiagecosmetics.com.ua")}
 STORE_ARG = {"mamulya": "Mamulya.lviv", "modnamama": "Modnamama", "znana": "Znana Mama"}
 SOLD_F = "status not in (6,7,13,15,8)"
+SPIR_BANNER = os.environ.get("SPIR_BANNER", "https://mamulya.lviv.ua/uploads/images/spirulina-offer.gif")  # банер/гіф офера спіруліни
 ALLOWED_HOSTS = ("mamulya.lviv.ua", "modnamama.ua", "znanamama.com.ua", "antiagecosmetics.com.ua", "lipoland.fun")
 BASE_URL = os.environ.get("BASE_URL", "https://mamulya-bot.onrender.com").rstrip("/")
 # клієнтський редирект кліків: Cloudflare Worker (завжди онлайн), fallback — /r самого бота
@@ -1175,6 +1176,23 @@ def cron():
                 except Exception as e: print("nearlvl", e)
         except Exception as e: print("nearlvl-block", e)
         DB.commit()
+        # 🌿 Спіруліна-офер постпартум-клієнтам: ~10 днів після покупки, один раз (вмикається env SPIR_OFFER_LIVE=1)
+        if os.environ.get("SPIR_OFFER_LIVE") == "1":
+            try:
+                for cid in resolve_ids("postpartum"):
+                    if DB.execute("select 1 from sent where chat_id=? and key='spiroffer'", (cid,)).fetchone(): continue
+                    pr = DB.execute("select phone from customers where chat_id=?", (cid,)).fetchone()
+                    ph = pr[0] if pr else ""
+                    if not ph: continue
+                    last = DB.execute(f"select max(ts) from orders where phone=? and {SOLD_F}", (ph,)).fetchone()[0]
+                    if not last or now - last < 10 * DAY: continue
+                    try:
+                        send_photo_url(cid, SPIR_BANNER, T["spir_offer"], [[("Оформити за 500 грн", BASE_URL + "/spir")]])
+                        DB.execute("insert into sent values(?,?,?)", (cid, "spiroffer", now))
+                        DB.execute("insert into spir_ev values('sent','',?)", (now,))
+                    except Exception as e: print("spiroffer", e)
+                DB.commit()
+            except Exception as e: print("spiroffer-block", e)
         for sid, seg, body, btn_s, img in DB.execute("select id,seg,body,btn,coalesce(img,'') from scheduled where done=0 and run_ts<=?", (now,)).fetchall():
             btn = tuple(btn_s.split("|", 1)) if btn_s else None
             excl = {r[0] for r in DB.execute("select chat_id from sched_excl where sid=?", (sid,))}
@@ -2067,16 +2085,20 @@ def posts_page():
     sp_paid = n("select count(*) from spir_ev where kind='paid'")
     sp_conv = f"{sp_paid/sp_open*100:.0f}%" if sp_open else "—"
     sp_rev = f"{sp_paid*SPIR['price']:,.0f}".replace(",", " ")
+    sp_sent = n("select count(*) from spir_ev where kind='sent'")
+    sp_cs = f"{sp_paid/sp_sent*100:.0f}%" if sp_sent else "—"
     pr1 = n("select count(distinct chat_id) from sent where key='promo_r1'")
     pr2 = n("select count(distinct chat_id) from sent where key='promo_r2'")
     pr3 = n("select count(distinct chat_id) from sent where key='promo_r3'")
     ml_cnt = n("select count(*) from orders where upper(coupon) like '%MALYA10%' and " + SOLD)
     ml_rev = f"{n('select coalesce(sum(amount),0) from orders where upper(coupon) like ? and ' + SOLD, '%MALYA10%'):,.0f}".replace(",", " ")
     lv_cnt = n("select count(*) from orders where upper(coupon) like '%LOVE7%' and " + SOLD)
-    spir_html = (f"<section class=p><h2>🌿 Спіруліна-офер <small>TOP, передоплата LiqPay</small></h2><table>"
+    spir_html = (f"<section class=p><h2>🌿 Спіруліна-офер <small>авто: 10 днів після покупки · передоплата LiqPay</small></h2><table>"
+        f"<tr><td>Надіслано офер (авто)</td><td class=n>{sp_sent}</td></tr>"
         f"<tr><td>Відкрили сторінку</td><td class=n>{sp_open}</td></tr>"
         f"<tr><td>Оформили</td><td class=n>{sp_ord}</td></tr>"
         f"<tr><td>Оплатили</td><td class=n><b>{sp_paid}</b></td></tr>"
+        f"<tr><td>Конверсія (оплата/надіслано)</td><td class=n>{sp_cs}</td></tr>"
         f"<tr><td>Конверсія (оплата/відкриття)</td><td class=n>{sp_conv}</td></tr>"
         f"<tr><td>Оборот, грн</td><td class=n>{sp_rev}</td></tr></table></section>"
         f"<section class=p><h2>🔥 Апгрейд знижки 7→10% <small>попап-ліди, хто не купив</small></h2><table>"
