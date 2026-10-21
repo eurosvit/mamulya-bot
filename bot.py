@@ -1183,23 +1183,28 @@ def cron():
         # 🌿 Спіруліна-офер постпартум-клієнтам: ~10 днів після покупки, один раз (вмикається env SPIR_OFFER_LIVE=1)
         if os.environ.get("SPIR_OFFER_LIVE") == "1":
             try:
-                sn = 0
+                due = []
                 for cid in resolve_ids("postpartum"):
                     if DB.execute("select 1 from sent where chat_id=? and key='spiroffer'", (cid,)).fetchone(): continue
                     pr = DB.execute("select phone from customers where chat_id=?", (cid,)).fetchone()
                     ph = pr[0] if pr else ""
                     if not ph: continue
                     last = DB.execute(f"select max(ts) from orders where phone=? and {SOLD_F}", (ph,)).fetchone()[0]
-                    if not last or now - last < 10 * DAY: continue
-                    try:
-                        send_photo_url(cid, SPIR_BANNER, T["spir_offer"], [[("Оформити за 500 грн", BASE_URL + "/spir")]])
-                        DB.execute("insert into sent values(?,?,?)", (cid, "spiroffer", now))
-                        DB.execute("insert into spir_ev values('sent','',?)", (now,)); sn += 1
-                    except Exception as e: print("spiroffer", e)
-                DB.commit()
-                if sn:
+                    if last and now - last >= 10 * DAY: due.append(cid)
+                if due:
+                    pid = DB.execute("insert into posts(ts,target,text) values(?,?,?)",
+                                     (now, "postpartum", "🌿 Спіруліна-офер (авто, 10 днів після покупки) · воронка в секції 🌿")).lastrowid
+                    sn = 0
+                    for cid in due:
+                        try:
+                            send_photo_url(cid, SPIR_BANNER, T["spir_offer"], [[("Оформити за 500 грн", BASE_URL + "/spir")]])
+                            DB.execute("insert into sent values(?,?,?)", (cid, "spiroffer", now))
+                            DB.execute("insert or ignore into sent values(?,?,?)", (cid, f"post:{pid}", now))
+                            DB.execute("insert into spir_ev values('sent','',?)", (now,)); sn += 1
+                        except Exception as e: print("spiroffer", e)
+                    DB.commit()
                     for a in ADMINS:
-                        try: send(a, f"🌿 Авто-офер спіруліни надіслано: <b>{sn}</b> клієнтам")
+                        try: send(a, f"🌿 Авто-офер спіруліни надіслано: <b>{sn}</b> клієнтам (рядок у Розсилках)")
                         except Exception: pass
             except Exception as e: print("spiroffer-block", e)
         for sid, seg, body, btn_s, img in DB.execute("select id,seg,body,btn,coalesce(img,'') from scheduled where done=0 and run_ts<=?", (now,)).fetchall():
