@@ -79,8 +79,8 @@ def _payment_block(cod):
 # ---- хвіст листа: кнопки, контакти, футер (спільне) ----
 _TAIL = r"""
   <tr><td style="padding:24px 22px 6px;text-align:center;">
-    <a href="https://mamulya.lviv.ua/dostavka-i-oplata?utm_source=email&utm_medium=email&utm_campaign=memo&utm_content=btn_dostavka" style="display:block;width:250px;box-sizing:border-box;background:#E05A50;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:13px 10px;border-radius:10px;margin:8px auto;text-align:center;">📦 Доставка та оплата</a>
-    <a href="https://mamulya.lviv.ua/povernennya?utm_source=email&utm_medium=email&utm_campaign=memo&utm_content=btn_povernennya" style="display:block;width:250px;box-sizing:border-box;background:#ffffff;color:#E05A50;text-decoration:none;font-size:14px;font-weight:600;padding:13px 10px;border-radius:10px;border:1.5px solid #E05A50;margin:8px auto;text-align:center;">🔁 Повернення та обмін</a>
+    <a href="%ESD%" style="display:block;width:250px;box-sizing:border-box;background:#E05A50;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:13px 10px;border-radius:10px;margin:8px auto;text-align:center;">📦 Доставка та оплата</a>
+    <a href="%ESP%" style="display:block;width:250px;box-sizing:border-box;background:#ffffff;color:#E05A50;text-decoration:none;font-size:14px;font-weight:600;padding:13px 10px;border-radius:10px;border:1.5px solid #E05A50;margin:8px auto;text-align:center;">🔁 Повернення та обмін</a>
   </td></tr>
   <tr><td style="padding:14px 22px 28px;text-align:center;">
     <div style="font-size:15px;font-weight:700;color:#3a2f34;">📞 Маєте питання?</div>
@@ -297,8 +297,15 @@ def order_memo_html(items=None, ttn=None, cod=None, okey=None):
                 .replace("<!--TTN-->", _ttn_block(ttn)))
     # блок оплати: для повної передоплати (cod=False) не показуємо взагалі
     pay = "" if cod is False else (_div("div-deposit.gif") + _payment_block(cod))
+    # кнопки на сайт — через редірект /es (лог кліку в maillog p{oid}), щоб бачити «переходи на сайт»
+    import urllib.parse as _up
+    oid = (okey or "p")[1:]
+    _D = "https://mamulya.lviv.ua/dostavka-i-oplata?utm_source=email&utm_medium=email&utm_campaign=memo&utm_content=btn_dostavka"
+    _P = "https://mamulya.lviv.ua/povernennya?utm_source=email&utm_medium=email&utm_campaign=memo&utm_content=btn_povernennya"
+    tail = (_TAIL.replace("%ESD%", f"{_TRACK}/es?o={oid}&u={_up.quote(_D, safe='')}")
+                 .replace("%ESP%", f"{_TRACK}/es?o={oid}&u={_up.quote(_P, safe='')}"))
     return (top
             + _div("div-accept.gif") + ACCEPT[cat]
             + _div("div-return.gif") + RETURNS[cat] + _RETURN_NOTE
             + pay
-            + _TAIL).replace("</body>", _px(okey)+"</body>")
+            + tail).replace("</body>", _px(okey)+"</body>")

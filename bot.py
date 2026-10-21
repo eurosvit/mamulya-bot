@@ -1790,6 +1790,15 @@ class Hook(BaseHTTPRequestHandler):
             bot = os.environ.get("BOT_NAME", "mamulyalvivbot")
             self.send_response(302); self.send_header("Location", f"https://t.me/{bot}?start=em{oid}")
             self.send_header("Cache-Control", "no-store"); self.end_headers(); return
+        if u.path == "/es":  # клік на сайт із памятки → лог (maillog p{oid}) + редірект на дозволений сайт
+            oid = "".join(c for c in qs.get("o", [""])[0] if c.isdigit())[:12]
+            dest = qs.get("u", [""])[0]
+            dd = urlparse(dest)
+            target = dest if dd.scheme in ("http", "https") and (dd.hostname or "") in ALLOWED_HOSTS else "https://mamulya.lviv.ua"
+            try: DB.execute("update maillog set clicked=? where k=? and clicked=0", (time.time(), f"p{oid}")); DB.commit()
+            except Exception as e: print("es", e)
+            self.send_response(302); self.send_header("Location", target)
+            self.send_header("Cache-Control", "no-store"); self.end_headers(); return
         if u.path == "/spir":  # публічна сторінка оформлення офера спіруліни
             try: DB.execute("insert into spir_ev values('open','',?)", (time.time(),)); DB.commit()
             except Exception as e: print("spir open", e)
@@ -2157,7 +2166,7 @@ def posts_page():
 <section class="p"><h2>Результат по магазинах <small>замовлення отримувачів розсилок, 7 днів</small></h2>
 <table><tr><th>Магазин</th><th class=n>Замовлень</th><th class=n>Оборот</th></tr>{store_rows}</table></section>
 <section class="p wide"><h2>📧 Авто-листи <small>відкриття приблизні (Gmail проксує картинки) · «перейшли в бот» і «нові» — точні</small></h2>
-<table><tr><th>Лист</th><th class=n>Надіслано</th><th class=n>Відкрито</th><th class=n>Клікнули в бот</th><th class=n>Перейшли в бот</th><th class=n>Нові (догнали листом)</th></tr>{mail_rows or '<tr><td>ще нема даних — зʼявиться після перших листів клієнтам</td></tr>'}</table></section>
+<table><tr><th>Лист</th><th class=n>Надіслано</th><th class=n>Відкрито</th><th class=n>Клікнули</th><th class=n>Перейшли в бот</th><th class=n>Нові (догнали листом)</th></tr>{mail_rows or '<tr><td>ще нема даних — зʼявиться після перших листів клієнтам</td></tr>'}</table></section>
 {spir_html}
 <section class="p wide"><h2>Заплановані <small>бот надішле сам у вказаний час · керування: <code>/schedule</code> у боті</small></h2>
 <table><tr><th>ID</th><th>Коли</th><th>Сегмент</th><th>Статус</th><th>Отримувачі</th><th>Текст</th></tr>{sched_rows or '<tr><td>нема запланованих — додайте <code>/schedule ДД.ММ ГГ:ХХ сегмент текст</code></td></tr>'}</table></section>
