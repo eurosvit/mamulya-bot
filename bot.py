@@ -52,6 +52,8 @@ try: DB.execute("alter table kpi_cache add column ret_num int default 0")
 except Exception: pass
 try: DB.execute("alter table kpi_cache add column ret_den int default 0")
 except Exception: pass
+try: DB.execute("alter table maillog add column clicked real default 0")  # клік по кнопці в бот (через /eb)
+except Exception: pass
 for _c in ("seo_sold", "seo_rev", "seo_new", "seo_den", "seo_sess"):
     try: DB.execute(f"alter table kpi_cache add column {_c} int default 0")
     except Exception: pass
@@ -1618,7 +1620,7 @@ class Hook(BaseHTTPRequestHandler):
                     cur, nxt = level_of(total)
                     nm = (c0d.get("fName") or "").strip()
                     has_gift = bool(DB.execute("select 1 from gifts g join customers c on c.chat_id=g.chat_id where c.phone=? limit 1", (phd,)).fetchone())
-                    bot_url = f"https://t.me/{os.environ.get('BOT_NAME','mamulyalvivbot')}?start=em{oidd}"
+                    bot_url = f"{BASE_URL}/eb?o={oidd}"  # через редірект /eb: ловимо клік ще до Telegram, тоді → ?start=em<oid>
                     DB.execute("insert into sent values(?,?,?)", (0, f"odeliv:{oidd}", time.time()))
                     DB.execute("insert or ignore into maillog(k,kind,email,sent) values(?,?,?,?)", (f"d{oidd}", "delivered", emd, time.time())); DB.commit()
                     threading.Thread(target=send_email, args=(emd, DELIVERED_SUBJECT, delivered_html(nm, total, cur, nxt, bot_url, has_gift, f"d{oidd}")), daemon=True).start()
@@ -1781,6 +1783,13 @@ class Hook(BaseHTTPRequestHandler):
             except Exception as e:
                 print("spir.jpg", e); self.send_response(404); self.end_headers()
             return
+        if u.path == "/eb":  # клік по кнопці «в бот» з листа → лог + редірект у Telegram deep-link
+            oid = "".join(c for c in qs.get("o", [""])[0] if c.isdigit())[:12]
+            try: DB.execute("update maillog set clicked=? where k=? and clicked=0", (time.time(), f"d{oid}")); DB.commit()
+            except Exception as e: print("eb", e)
+            bot = os.environ.get("BOT_NAME", "mamulyalvivbot")
+            self.send_response(302); self.send_header("Location", f"https://t.me/{bot}?start=em{oid}")
+            self.send_header("Cache-Control", "no-store"); self.end_headers(); return
         if u.path == "/spir":  # публічна сторінка оформлення офера спіруліни
             try: DB.execute("insert into spir_ev values('open','',?)", (time.time(),)); DB.commit()
             except Exception as e: print("spir open", e)
@@ -2070,10 +2079,10 @@ def posts_page():
               "Mamulya.lviv": "Mamulya", "Modnamama": "Modnamama", "Znana Mama": "Znana", "всі": "усім"}
     posts = q("select id, ts, target, text from posts order by ts desc limit 50")
     mail_rows = ""
-    for kind, cnt, op, ent, nu in q("select kind, count(*), sum(case when opened>0 then 1 else 0 end), sum(case when entered>0 then 1 else 0 end), sum(newuser) from maillog group by kind order by kind"):
-        op, ent, nu = op or 0, ent or 0, nu or 0
+    for kind, cnt, op, cl, ent, nu in q("select kind, count(*), sum(case when opened>0 then 1 else 0 end), sum(case when clicked>0 then 1 else 0 end), sum(case when entered>0 then 1 else 0 end), sum(newuser) from maillog group by kind order by kind"):
+        op, cl, ent, nu = op or 0, cl or 0, ent or 0, nu or 0
         label = {"memo": "📦 Памятка «в дорозі»", "delivered": "🎉 «Забрали» + лояльність"}.get(kind, kind)
-        mail_rows += f"<tr><td>{label}</td><td class=n>{cnt}</td><td class=n>{op} ({op/cnt*100:.0f}%)</td><td class=n>{ent} ({ent/cnt*100:.0f}%)</td><td class=n><b>{nu}</b></td></tr>"
+        mail_rows += f"<tr><td>{label}</td><td class=n>{cnt}</td><td class=n>{op} ({op/cnt*100:.0f}%)</td><td class=n>{cl} ({cl/cnt*100:.0f}%)</td><td class=n>{ent} ({ent/cnt*100:.0f}%)</td><td class=n><b>{nu}</b></td></tr>"
     AT = attrib_orders()  # last-click атрибуція
     rows = ""
     tot_deliv = tot_ord = tot_rev = 0
@@ -2148,7 +2157,7 @@ def posts_page():
 <section class="p"><h2>Результат по магазинах <small>замовлення отримувачів розсилок, 7 днів</small></h2>
 <table><tr><th>Магазин</th><th class=n>Замовлень</th><th class=n>Оборот</th></tr>{store_rows}</table></section>
 <section class="p wide"><h2>📧 Авто-листи <small>відкриття приблизні (Gmail проксує картинки) · «перейшли в бот» і «нові» — точні</small></h2>
-<table><tr><th>Лист</th><th class=n>Надіслано</th><th class=n>Відкрито</th><th class=n>Перейшли в бот</th><th class=n>Нові (догнали листом)</th></tr>{mail_rows or '<tr><td>ще нема даних — зʼявиться після перших листів клієнтам</td></tr>'}</table></section>
+<table><tr><th>Лист</th><th class=n>Надіслано</th><th class=n>Відкрито</th><th class=n>Клікнули в бот</th><th class=n>Перейшли в бот</th><th class=n>Нові (догнали листом)</th></tr>{mail_rows or '<tr><td>ще нема даних — зʼявиться після перших листів клієнтам</td></tr>'}</table></section>
 {spir_html}
 <section class="p wide"><h2>Заплановані <small>бот надішле сам у вказаний час · керування: <code>/schedule</code> у боті</small></h2>
 <table><tr><th>ID</th><th>Коли</th><th>Сегмент</th><th>Статус</th><th>Отримувачі</th><th>Текст</th></tr>{sched_rows or '<tr><td>нема запланованих — додайте <code>/schedule ДД.ММ ГГ:ХХ сегмент текст</code></td></tr>'}</table></section>
