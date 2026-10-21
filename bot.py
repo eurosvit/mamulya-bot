@@ -505,8 +505,8 @@ SHOP_BTN = {"mamulya": ("🛍 На Mamulya.lviv", "https://mamulya.lviv.ua"),
             "antiage": ("🛍 На AntiAge", "https://antiagecosmetics.com.ua")}
 STORE_ARG = {"mamulya": "Mamulya.lviv", "modnamama": "Modnamama", "znana": "Znana Mama"}
 SOLD_F = "status not in (6,7,13,15,8)"
-SPIR_BANNER = os.environ.get("SPIR_BANNER", "https://mamulya-bot.onrender.com/spir.gif")  # банер/гіф офера (бот віддає сам)
-_SPIR_GIF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "spirulina-offer.gif")
+SPIR_BANNER = os.environ.get("SPIR_BANNER", "https://mamulya-bot.onrender.com/spir.jpg")  # банер офера (бот віддає сам)
+_SPIR_IMG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "spirulina-offer.jpg")
 ALLOWED_HOSTS = ("mamulya.lviv.ua", "modnamama.ua", "znanamama.com.ua", "antiagecosmetics.com.ua", "lipoland.fun")
 BASE_URL = os.environ.get("BASE_URL", "https://mamulya-bot.onrender.com").rstrip("/")
 # клієнтський редирект кліків: Cloudflare Worker (завжди онлайн), fallback — /r самого бота
@@ -1763,13 +1763,13 @@ class Hook(BaseHTTPRequestHandler):
                 body = info_page("Некоректне посилання.")
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body); return
-        if u.path == "/spir.gif":  # банер-гіф офера (бот віддає сам, без зовнішнього хостингу)
+        if u.path == "/spir.jpg":  # банер офера (бот віддає сам, без зовнішнього хостингу)
             try:
-                with open(_SPIR_GIF, "rb") as fh: data = fh.read()
-                self.send_response(200); self.send_header("Content-Type", "image/gif")
+                with open(_SPIR_IMG, "rb") as fh: data = fh.read()
+                self.send_response(200); self.send_header("Content-Type", "image/jpeg")
                 self.send_header("Cache-Control", "public, max-age=86400"); self.end_headers(); self.wfile.write(data)
             except Exception as e:
-                print("spir.gif", e); self.send_response(404); self.end_headers()
+                print("spir.jpg", e); self.send_response(404); self.end_headers()
             return
         if u.path == "/spir":  # публічна сторінка оформлення офера спіруліни
             try: DB.execute("insert into spir_ev values('open','',?)", (time.time(),)); DB.commit()
