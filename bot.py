@@ -2139,11 +2139,11 @@ def posts_page():
 <div class=tiles>{"".join(f'<div class=tile><b>{v}</b><span>{k}</span></div>' for k, v in cards)}</div>
 <div class=grid>
 <section class="p wide"><h2>Надіслані розсилки <small>останні 50 · замовлення/оборот — отримувачі протягом 7 днів після</small></h2>
-<table><tr><th>Коли</th><th>Сегмент</th><th>Доставлено</th><th>Кліки</th><th>CTR</th><th>Замовлень</th><th>Конв.</th><th>Оборот</th><th>Текст</th></tr>{rows or '<tr><td>ще не було розсилок — надішліть /post у боті</td></tr>'}</table></section>
+<table><tr><th>Коли</th><th>Сегмент</th><th class=n>Доставлено</th><th class=n>Кліки</th><th class=n>CTR</th><th class=n>Замовлень</th><th class=n>Конв.</th><th class=n>Оборот</th><th>Текст</th></tr>{rows or '<tr><td>ще не було розсилок — надішліть /post у боті</td></tr>'}</table></section>
 <section class="p"><h2>Результат по магазинах <small>замовлення отримувачів розсилок, 7 днів</small></h2>
-<table><tr><th>Магазин</th><th>Замовлень</th><th>Оборот</th></tr>{store_rows}</table></section>
+<table><tr><th>Магазин</th><th class=n>Замовлень</th><th class=n>Оборот</th></tr>{store_rows}</table></section>
 <section class="p wide"><h2>📧 Авто-листи <small>відкриття приблизні (Gmail проксує картинки) · «перейшли в бот» і «нові» — точні</small></h2>
-<table><tr><th>Лист</th><th>Надіслано</th><th>Відкрито</th><th>Перейшли в бот</th><th>Нові (догнали листом)</th></tr>{mail_rows or '<tr><td>ще нема даних — зʼявиться після перших листів клієнтам</td></tr>'}</table></section>
+<table><tr><th>Лист</th><th class=n>Надіслано</th><th class=n>Відкрито</th><th class=n>Перейшли в бот</th><th class=n>Нові (догнали листом)</th></tr>{mail_rows or '<tr><td>ще нема даних — зʼявиться після перших листів клієнтам</td></tr>'}</table></section>
 {spir_html}
 <section class="p wide"><h2>Заплановані <small>бот надішле сам у вказаний час · керування: <code>/schedule</code> у боті</small></h2>
 <table><tr><th>ID</th><th>Коли</th><th>Сегмент</th><th>Статус</th><th>Отримувачі</th><th>Текст</th></tr>{sched_rows or '<tr><td>нема запланованих — додайте <code>/schedule ДД.ММ ГГ:ХХ сегмент текст</code></td></tr>'}</table></section>
@@ -2255,7 +2255,7 @@ h2 small{font-weight:400;color:var(--ink3)}
 table{border-collapse:collapse;width:100%;font-size:12.5px}
 td,th{padding:4px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 tr:last-child td{border-bottom:0}th{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink3)}
-td.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+td.n,th.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 td.b{width:34%}td.b i{display:block;height:6px;background:var(--acc);border-radius:3px;min-width:2px}
 tr.sub td{color:var(--ink2);font-size:12px;padding-left:20px}
 a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
