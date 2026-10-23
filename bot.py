@@ -997,6 +997,35 @@ def pull_all(sajts, max_pages=80):
         page += 1; time.sleep(7)
     return out
 
+def retag_stores():
+    # бекфіл магазину: читаємо всі замовлення 4 магазинів, кожному клієнту БЕЗ мітки
+    # проставляємо store за ПЕРШИМ замовленням (acquisition). Один прогін, щоб вкластись у ліміти.
+    if not os.environ.get("SALESDRIVE_KEY"): return
+    sajts = [94, 97, 134, 120, 150, 157, 164, 170]
+    sj = "".join(f"&filter[sajt][]={s}" for s in sajts)
+    phone_first = {}  # phone -> (orderTime, store)
+    page = 1
+    while page <= 80:
+        try: r = sd_get(f"?page={page}&limit=100{sj}")
+        except Exception as e: print("retag pull", e); break
+        data = r.get("data") or []
+        for o in data:
+            c0 = (o.get("contacts") or [{}])[0] if isinstance(o.get("contacts"), list) else {}
+            ph = norm_phone((c0.get("phone") or [""])[0] if c0 else "")
+            ot = str(o.get("orderTime") or "")[:19]
+            store = STORES.get(int(o.get("sajt") or 0))
+            if ph and store and (ph not in phone_first or ot < phone_first[ph][0]):
+                phone_first[ph] = (ot, store)
+        if len(data) < 100: break
+        page += 1; time.sleep(7)
+    n = 0
+    for ph, (ot, store) in phone_first.items():
+        n += DB.execute("update customers set store=? where phone=? and coalesce(store,'')=''", (store, ph)).rowcount
+    DB.commit()
+    for a in ADMINS:
+        try: send(a, f"🔖 Перепозначено магазинів: <b>{n}</b> клієнтів (без мітки → за першим замовленням)")
+        except Exception: pass
+
 def ga_sessions(prop):
     # {YYYY-MM: органічні сесії GA4} з початку року; потрібні env GA_SA_KEY(JSON) + property
     key = os.environ.get("GA_SA_KEY", "")
@@ -1937,6 +1966,10 @@ class Hook(BaseHTTPRequestHandler):
         if u.path == "/kpirefresh" and authed:
             threading.Thread(target=kpi_refresh, daemon=True).start()
             self.send_response(302); self.send_header("Location", f"/kpi?key={os.environ.get('ADMIN_KEY','')}"); self.end_headers(); return
+        if u.path == "/retagstores" and authed:  # бекфіл магазину для клієнтів без мітки
+            threading.Thread(target=retag_stores, daemon=True).start()
+            self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
+            self.wfile.write("Перепозначення запущено (~5-10 хв). Прийде сповіщення адмінам із кількістю.".encode()); return
         if u.path == "/testdeliv" and authed:  # тест листа «забрали»: /testdeliv?key=&to=&total=12000&gift=0
             to = qs.get("to", [""])[0].strip()
             total = float(qs.get("total", ["12000"])[0] or 0)
