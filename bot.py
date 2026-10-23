@@ -236,7 +236,7 @@ def fetch_order(order_id):
     return None, [], ""
 
 STORES = {94: "Mamulya.lviv", 97: "Mamulya.lviv", 134: "Mamulya.lviv", 120: "Modnamama", 150: "Modnamama", 157: "Modnamama", 164: "Znana Mama", 22: "AntiAge", 46: "AntiAge",
-          100: "Rozetka", 110: "Rozetka", 145: "Rozetka", 98: "Etsy", 26: "Lipoland (eBay)", 30: "kolyaska.ua", 39: "happyparents", 76: "Vdomagarno", 82: "Mama_Sling", 111: "Eva.ua"}
+          100: "Rozetka", 110: "Rozetka", 145: "Rozetka", 98: "Etsy", 26: "Lipoland (eBay)", 170: "Lipoland", 30: "kolyaska.ua", 39: "happyparents", 76: "Vdomagarno", 82: "Mama_Sling", 111: "Eva.ua"}
 MARKETPLACE_FALLBACK = "Hubber та інші маркетплейси"  # усі sajt поза мапою — це Hubber-канали
 # ponytail: рахуємо все живе одразу; DECLINED/Повернення/Скасований/TEST/Видалений випадають самі при зміні статусу (вебхук)
 
