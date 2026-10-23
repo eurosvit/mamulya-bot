@@ -54,7 +54,7 @@ try: DB.execute("alter table kpi_cache add column ret_den int default 0")
 except Exception: pass
 try: DB.execute("alter table maillog add column clicked real default 0")  # клік по кнопці в бот (через /eb)
 except Exception: pass
-for _c in ("seo_sold", "seo_rev", "seo_new", "seo_den", "seo_sess"):
+for _c in ("seo_sold", "seo_rev", "seo_new", "seo_den", "seo_sess", "returned"):
     try: DB.execute(f"alter table kpi_cache add column {_c} int default 0")
     except Exception: pass
 try: DB.execute("alter table scheduled add column img text default ''")
@@ -1035,7 +1035,7 @@ def kpi_refresh():
             orders = pull_all(sajts)
         except Exception as e:
             print("kpi_pull", store, e); continue
-        M = defaultdict(lambda: {"zay": 0, "canc": 0, "decl": 0, "sold": 0, "seo_sold": 0, "seo_rev": 0.0})
+        M = defaultdict(lambda: {"zay": 0, "canc": 0, "decl": 0, "sold": 0, "returned": 0, "seo_sold": 0, "seo_rev": 0.0})
         # повторні рахуємо ЛИШЕ по SOLD (реально отримане) — інакше ловимо дублі-заявки
         first = {}
         for ph, ot, st, camp, amt in orders:
@@ -1051,6 +1051,7 @@ def kpi_refresh():
                 if st == 13: d["canc"] += 1
                 if st == 6: d["decl"] += 1
                 if st == 5: d["sold"] += 1
+                if st == 7: d["returned"] += 1   # Повернення — повернули гроші після викупу (менеджер)
             if st == 5:                     # SOLD
                 if ph:
                     buyers[ym].add(ph)
@@ -1064,9 +1065,9 @@ def kpi_refresh():
             if ym < "2026-01": continue
             B = buyers.get(ym, set()); R = repeat.get(ym, set())
             sb = seo_buyers.get(ym, set()); sn = seo_new.get(ym, set())
-            DB.execute("insert into kpi_cache(store,ym,zay,canc,decl,sold,updated,ret_num,ret_den,seo_sold,seo_rev,seo_new,seo_den) values(?,?,?,?,?,?,?,?,?,?,?,?,?) "
-                       "on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated,ret_num=excluded.ret_num,ret_den=excluded.ret_den,seo_sold=excluded.seo_sold,seo_rev=excluded.seo_rev,seo_new=excluded.seo_new,seo_den=excluded.seo_den",
-                       (store, ym, d["zay"], d["canc"], d["decl"], d["sold"], time.time(), len(R), len(B), d["seo_sold"], round(d["seo_rev"]), len(sn), len(sb)))
+            DB.execute("insert into kpi_cache(store,ym,zay,canc,decl,sold,updated,ret_num,ret_den,seo_sold,seo_rev,seo_new,seo_den,returned) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                       "on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated,ret_num=excluded.ret_num,ret_den=excluded.ret_den,seo_sold=excluded.seo_sold,seo_rev=excluded.seo_rev,seo_new=excluded.seo_new,seo_den=excluded.seo_den,returned=excluded.returned",
+                       (store, ym, d["zay"], d["canc"], d["decl"], d["sold"], time.time(), len(R), len(B), d["seo_sold"], round(d["seo_rev"]), len(sn), len(sb), d["returned"]))
         DB.commit()
         prop = GA_PROPS.get(store, "")  # Mamulya + AntiAge мають GA4-property (той самий SA)
         if prop:
@@ -2296,7 +2297,7 @@ def kpi_page(store=None):
     STORE = store if store in all_stores else all_stores[0]
     sw = "".join(f'<a class="{"on" if s==STORE else ""}" href="/kpi?key={AK}&store={urllib.parse.quote(s)}">{s}</a>' for s in all_stores)
     UA_MON = ["", "січень", "лютий", "березень", "квітень", "травень", "червень", "липень", "серпень", "вересень", "жовтень", "листопад", "грудень"]
-    rows = DB.execute("select ym, zay, canc, decl, sold, ret_num, ret_den from kpi_cache where store=? order by ym desc", (STORE,)).fetchall()
+    rows = DB.execute("select ym, zay, canc, decl, sold, ret_num, ret_den, returned from kpi_cache where store=? order by ym desc", (STORE,)).fetchall()
     upd = DB.execute("select max(updated) from kpi_cache").fetchone()[0]
     upd_s = time.strftime("%d.%m %H:%M", time.localtime(upd)) if upd else "—"
     def cell(num, den, color, good=None, hi=None):
@@ -2307,21 +2308,23 @@ def kpi_page(store=None):
         if good is not None: col = "#2E8B57" if (p >= good) else "#B8325A"
         return f"<td style=color:{col}><b>{p:.1f}%</b> <span style=color:#A1939A;font-weight:400>({num})</span></td>"
     out = ""
-    tz = tc = td_ = ts = trn = trd = 0
-    for ym, zay, canc, decl, sold, rn, rd in rows:
+    tz = tc = td_ = ts = trn = trd = tret = 0
+    for ym, zay, canc, decl, sold, rn, rd, ret in rows:
         if ym < "2026-09": continue   # KPI-скасування рахуємо з вересня
         y, mm = ym.split("-"); nm = f"{UA_MON[int(mm)]} {y}"
-        tz += zay; tc += canc; td_ += decl; ts += sold; trn += rn; trd += rd
+        tz += zay; tc += canc; td_ += decl; ts += sold; trn += rn; trd += rd; tret += (ret or 0)
         out += (f"<tr><td>{nm}</td><td>{zay}</td>"
                 + cell(canc, zay, "#B8325A", hi=18)
                 + cell(decl, zay, "#A86A1F")
                 + cell(sold, zay, "#2E8B57")
+                + cell(ret or 0, zay, "#A86A1F")
                 + cell(rn, rd, "#7C3AED", good=15) + "</tr>")
     if rows:
         out += (f"<tr style=border-top:2px solid #E8DCD8;font-weight:700><td>Разом</td><td>{tz}</td>"
                 + cell(tc, tz, "#B8325A", hi=18)
                 + cell(td_, tz, "#A86A1F")
                 + cell(ts, tz, "#2E8B57")
+                + cell(tret, tz, "#A86A1F")
                 + cell(trn, trd, "#7C3AED", good=15) + "</tr>")
     empty = not rows
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
@@ -2334,7 +2337,7 @@ def kpi_page(store=None):
 <div class=nav style=margin-top:-6px>{sw}</div>
 <div class=grid>
 <section class="p wide"><h2>KPI по місяцях <small>{STORE} · джерело SalesDrive · % і кількість у дужках</small></h2>
-<table id=kt><tr><th>Місяць</th><th>Заявки</th><th>Скасовано ≤18%</th><th>Відмова</th><th>Продано</th><th>Повторні ≥15%</th></tr>{out or ('<tr><td>ще не завантажено — тисни «Оновити з SalesDrive»</td></tr>' if empty else '')}</table>
+<table id=kt><tr><th>Місяць</th><th>Заявки</th><th>Скасовано ≤18%</th><th>Відмова</th><th>Продано</th><th>Повернення</th><th>Повторні ≥15%</th></tr>{out or ('<tr><td>ще не завантажено — тисни «Оновити з SalesDrive»</td></tr>' if empty else '')}</table>
 <div style=color:#6E5F65;font-size:12.5px;margin-top:8px>
 <p style=margin:0 0 6px>У кожній клітинці — <b>% (кількість)</b>.</p>
 <ul style=margin:0;padding-left:18px;line-height:1.75>
@@ -2342,6 +2345,7 @@ def kpi_page(store=None):
 <li><b>Скасовано</b> — статус «Скасований» до відправки ÷ заявки. Ціль <b>≤18%</b> (зелений = у нормі).</li>
 <li><b>Відмова</b> — Decline, не викупили посилку. Пізній статус — свіжий місяць занижує.</li>
 <li><b>Продано</b> — статус SOLD ÷ заявки.</li>
+<li><b>Повернення</b> — статус «Повернення» (гроші повернули ПІСЛЯ викупу, ставить менеджер) ÷ заявки. Уже <b>виключені</b> з «Продано», оборотів, лояльності й повторних.</li>
 <li><b>Повторні</b> — рахуються лише по <b>отриманих (SOLD)</b> замовленнях: покупці місяця, для кого це не перша отримана покупка ÷ усі, хто отримав того місяця. Ціль <b>≥15%</b>. Історія з усіх даних SalesDrive.</li>
 </ul>
 <p style=margin:6px 0 0>Усе прямо з SalesDrive, кожне замовлення рахується раз.</p>
