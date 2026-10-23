@@ -1776,13 +1776,14 @@ class Hook(BaseHTTPRequestHandler):
                 body = info_page("Некоректне посилання.")
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body); return
-        if u.path == "/spir.jpg":  # банер офера (бот віддає сам, без зовнішнього хостингу)
+        if u.path in ("/spir.jpg", "/home.jpg"):  # банери розсилок (бот віддає сам)
+            fn = _SPIR_IMG if u.path == "/spir.jpg" else os.path.join(os.path.dirname(os.path.abspath(__file__)), "home-wear.jpg")
             try:
-                with open(_SPIR_IMG, "rb") as fh: data = fh.read()
+                with open(fn, "rb") as fh: data = fh.read()
                 self.send_response(200); self.send_header("Content-Type", "image/jpeg")
                 self.send_header("Cache-Control", "public, max-age=86400"); self.end_headers(); self.wfile.write(data)
             except Exception as e:
-                print("spir.jpg", e); self.send_response(404); self.end_headers()
+                print("banner", u.path, e); self.send_response(404); self.end_headers()
             return
         if u.path == "/eb":  # клік по кнопці «в бот» з листа → лог + редірект у Telegram deep-link
             oid = "".join(c for c in qs.get("o", [""])[0] if c.isdigit())[:12]
