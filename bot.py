@@ -591,6 +591,8 @@ def resolve_ids(seg):
         sql = None
     if sql:
         return [r[0] for r in DB.execute(f"select chat_id from customers c where {sql}")]
+    if seg == "lipoland":   # Lipoland як магазин: усі з lipoland.fun (store) + стадія lipoland
+        return [r[0] for r in DB.execute("select chat_id from customers where stage='lipoland' or store='Lipoland'")]
     if seg in LIFECYCLE:
         return [r[0] for r in DB.execute("select chat_id from customers where stage=?", (seg,))]
     if seg in STORE_ARG:
@@ -730,7 +732,7 @@ def on_text(chat_id, text):
         send_photo_url(chat_id, SPIR_BANNER, T["spir_offer"], [[("Оформити за 500 грн", BASE_URL + "/spir")]])
         return send(chat_id, "👆 Так виглядатиме авто-офер спіруліни клієнту.\nУвімкнути розсилку всім постпартум: <code>SPIR_OFFER_LIVE=1</code> у Render.")
     if chat_id in ADMINS and t == "/post":
-        return send(chat_id, "Розсилка. Формат: <code>/post &lt;сегмент&gt; текст</code>\n\nСегменти:\n• <b>(без сегмента)</b> — усім у боті\n• <b>nobuy</b> — ще без покупок (дотиск до першої)\n• <b>buyers</b> — з покупками\n• <b>vip</b> — рівень VIP+ (від 15 000)\n• <b>sleeping</b> — купували, але тиша 60+ днів\n• <b>near</b> — лишилось ≤1000 грн до наступного рівня\n• <b>doman</b> — малюки за віком + минулі покупці Ліполенд\n• <b>pregnant/m0_3/m3_6/m6_12/lipoland</b> — за стадією\n• <b>mamulya/modnamama/znana</b> — за магазином\n\n<b>Кнопка</b> (необовʼязково): додайте в кінці <code>|| текст | посилання</code> або ярлик магазину <code>|| mamulya</code> (modnamama/znana/antiage).\n<b>Фото</b> (необовʼязково): додайте в кінці <code>@img https://…jpg</code> (після кнопки).\n\n<b>Персоналізація</b> — підставляються під кожного:\n<code>{імя}</code> імʼя (або «Мамо»), <code>{сума}</code> всього покупок, <code>{залишок}</code> грн до наступного рівня, <code>{рівень}</code> % наступного рівня, <code>{поточна}</code> % поточної знижки.\nНапр.: <code>/post near {імя}, лишилось {залишок} грн до знижки {рівень} 💗</code>\n\nПриклади:\n<code>/post nobuy Знижка −7% чекає 💗 || mamulya</code>\n<code>/post doman Новинка! || mamulya @img https://mamulya.lviv.ua/…png</code>\n\n⏰ Запланувати: <code>/schedule 07.10 11:00 nobuy текст || mamulya</code> · список/скасування: <code>/schedule</code>")
+        return send(chat_id, "Розсилка. Формат: <code>/post &lt;сегмент&gt; текст</code>\n\nСегменти:\n• <b>(без сегмента)</b> — усім у боті\n• <b>nobuy</b> — ще без покупок (дотиск до першої)\n• <b>buyers</b> — з покупками\n• <b>vip</b> — рівень VIP+ (від 15 000)\n• <b>sleeping</b> — купували, але тиша 60+ днів\n• <b>near</b> — лишилось ≤1000 грн до наступного рівня\n• <b>doman</b> — малюки за віком + минулі покупці Ліполенд\n• <b>pregnant/m0_3/m3_6/m6_12</b> — за стадією\n• <b>mamulya/modnamama/znana/lipoland</b> — за магазином\n\n<b>Кнопка</b> (необовʼязково): додайте в кінці <code>|| текст | посилання</code> або ярлик магазину <code>|| mamulya</code> (modnamama/znana/antiage).\n<b>Фото</b> (необовʼязково): додайте в кінці <code>@img https://…jpg</code> (після кнопки).\n\n<b>Персоналізація</b> — підставляються під кожного:\n<code>{імя}</code> імʼя (або «Мамо»), <code>{сума}</code> всього покупок, <code>{залишок}</code> грн до наступного рівня, <code>{рівень}</code> % наступного рівня, <code>{поточна}</code> % поточної знижки.\nНапр.: <code>/post near {імя}, лишилось {залишок} грн до знижки {рівень} 💗</code>\n\nПриклади:\n<code>/post nobuy Знижка −7% чекає 💗 || mamulya</code>\n<code>/post doman Новинка! || mamulya @img https://mamulya.lviv.ua/…png</code>\n\n⏰ Запланувати: <code>/schedule 07.10 11:00 nobuy текст || mamulya</code> · список/скасування: <code>/schedule</code>")
     if chat_id in ADMINS and (t == "/schedule" or t.startswith("/schedule ")):
         arg = t[9:].strip()
         if arg.startswith("cancel"):
@@ -2154,6 +2156,11 @@ def posts_page():
         f"<tr><td>Нагадування день 10 (−10% MALYA10)</td><td class=n>{pr3}</td></tr>"
         f"<tr><td>Замовлень з LOVE7 (−7%)</td><td class=n>{lv_cnt}</td></tr>"
         f"<tr><td>Замовлень з MALYA10 (−10%)</td><td class=n><b>{ml_cnt}</b> · {ml_rev} грн</td></tr></table></section>")
+    # 👥 користувачі бота по магазинах
+    store_rows_c = DB.execute("select coalesce(nullif(store,''),'(не вказано)') st, count(*) c from customers group by st order by c desc").fetchall()
+    storecust_html = ("<section class=p><h2>👥 Користувачі бота по магазинах <small>джерело замовлення, яким клієнт зайшов</small></h2>"
+        "<table><tr><th>Магазин</th><th class=n>Користувачів</th></tr>"
+        + "".join(f"<tr><td>{st}</td><td class=n>{c}</td></tr>" for st, c in store_rows_c) + "</table></section>")
     cards = [("Розсилок", len(posts)), ("Доставлено", tot_deliv), ("Замовлень після (7д)", tot_ord), ("Оборот, грн", f"{tot_rev:,.0f}".replace(",", " "))]
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Розсилки — Mamulya Bot</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
@@ -2170,6 +2177,7 @@ def posts_page():
 <section class="p wide"><h2>📧 Авто-листи <small>відкриття приблизні (Gmail проксує картинки) · «перейшли в бот» і «нові» — точні</small></h2>
 <table><tr><th>Лист</th><th class=n>Надіслано</th><th class=n>Відкрито</th><th class=n>Клікнули</th><th class=n>Перейшли в бот</th><th class=n>Нові (догнали листом)</th></tr>{mail_rows or '<tr><td>ще нема даних — зʼявиться після перших листів клієнтам</td></tr>'}</table></section>
 {spir_html}
+{storecust_html}
 <section class="p wide"><h2>Заплановані <small>бот надішле сам у вказаний час · керування: <code>/schedule</code> у боті</small></h2>
 <table><tr><th>ID</th><th>Коли</th><th>Сегмент</th><th>Статус</th><th>Отримувачі</th><th>Текст</th></tr>{sched_rows or '<tr><td>нема запланованих — додайте <code>/schedule ДД.ММ ГГ:ХХ сегмент текст</code></td></tr>'}</table></section>
 </div></html>"""
