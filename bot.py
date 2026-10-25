@@ -2665,7 +2665,7 @@ def admin_page():
 
     cfg_stage = "".join(f"<tr><td>{STAGE_UA.get(st, st)}</td><td>{', '.join(kws)}</td></tr>" for st, kws in STAGE_RULES)
     cfg_gifts = "".join(f"<tr><td>{STAGE_UA.get(st, st)}</td><td>{' → '.join(g['label'] for g in gs)}</td></tr>" for st, gs in GIFTS.items())
-    cfg_life = "".join(f"<tr><td>{STAGE_UA.get(st, st)}</td><td class=n>+{d}д</td><td>{txt}</td><td>{(u or '—').replace('https://','')}</td></tr>" for st, items in LIFECYCLE.items() for d, k, txt, u in items)
+    cfg_life = "".join(f"<tr><td>{STAGE_UA.get(st, st)}</td><td class=n>+{it[0]}д</td><td>{it[2]}</td><td>{(it[3] or '—').replace('https://','')}</td></tr>" for st, items in LIFECYCLE.items() for it in items)  # index, не unpack — тупли бувають 4 і 5 полів
     cfg_texts = "".join(f"<tr><td><code>{k}</code></td><td>{v.replace(chr(10),'<br>')}</td></tr>" for k, v in T.items())
 
     def panel(title, inner, wide=False, extra=""):
