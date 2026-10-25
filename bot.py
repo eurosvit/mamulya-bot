@@ -169,6 +169,7 @@ MAIL_TYPO = {
     "ukr.ne": "ukr.net", "ukr.nt": "ukr.net", "ukr.met": "ukr.net", "ukrr.net": "ukr.net",
     "outlok.com": "outlook.com", "hotmai.com": "hotmail.com",
     "hotmial.com": "hotmail.com", "hotmaill.com": "hotmail.com", "yaho.com": "yahoo.com", "iclod.com": "icloud.com",
+    "ymail.com": "gmail.com",  # за рішенням Яни: у нашій базі це описка gmail, не реальний Yahoo
 }
 
 def fix_email(addr):
@@ -180,7 +181,7 @@ def fix_email(addr):
 
 assert fix_email("kseniasaulak@gmaill.com") == "kseniasaulak@gmail.com"
 assert fix_email("a@gmial.com") == "a@gmail.com" and fix_email("a@ukr.ne") == "a@ukr.net"
-assert fix_email("a@gmail.com") == "a@gmail.com" and fix_email("a@ymail.com") == "a@ymail.com"
+assert fix_email("a@gmail.com") == "a@gmail.com" and fix_email("a@ymail.com") == "a@gmail.com"
 assert fix_email("a@mycompany.com") == "a@mycompany.com" and fix_email("bad") == "bad"
 
 def send_email(to, subject, html):
