@@ -288,28 +288,98 @@ def cron():
         DB.commit()
         time.sleep(3600)
 
+CAB_CSS = '''<style>
+*{box-sizing:border-box}body{font:13.5px/1.5 "Golos Text",system-ui,sans-serif;margin:0;background:#F2F5F1;color:#22301F;padding:18px}
+.top{display:flex;align-items:center;gap:12px;margin-bottom:8px}.top h1{font-size:19px;margin:0}.upd{font-size:11.5px;color:#93A28C}
+.nav{display:flex;gap:6px;margin:8px 0 16px}.nav a{padding:6px 14px;border-radius:999px;background:#fff;border:1px solid #DFE7DB;color:#5F7057;text-decoration:none;font-size:13px}
+.nav a.on{background:#4E7A63;color:#fff;border-color:#4E7A63}
+.tiles{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px}
+.tile{background:#fff;border:1px solid #DFE7DB;border-radius:10px;padding:9px 15px;min-width:108px}
+.tile b{display:block;font-size:21px}.tile span{font-size:10.5px;color:#93A28C;text-transform:uppercase}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.p{background:#fff;border:1px solid #DFE7DB;border-radius:12px;padding:14px}.p.wide{grid-column:1/-1}
+.p h2{font-size:13px;color:#5F7057;margin:0 0 10px;font-weight:600}.p h2 small{color:#A9B6A2;font-weight:400}
+table{border-collapse:collapse;width:100%;font-size:12.5px}td,th{padding:5px 8px;border-bottom:1px solid #EEF2EC;text-align:left}
+th{color:#93A28C;font-weight:500}td.n{text-align:right;font-variant-numeric:tabular-nums}
+.bar{width:64px}.bar i{display:inline-block;height:7px;background:#9FD8BE;border-radius:4px}
+a{color:#4E7A63}
+</style>'''
+
 def admin_page():
     q = lambda sql: DB.execute(sql).fetchall()
     n = lambda sql: q(sql)[0][0]
-    CAT = {"face": "Обличчя", "body": "Тіло", "hair": "Волосся", "intimate": "Інтимний", "complex": "Комплексний", "": "—"}
-    cats = q("select cat, count(*) from users group by cat order by 2 desc")
-    srcs = q("select coalesce(nullif(src,''),'—'), count(*) from users group by 1 order by 2 desc")
-    total = n("select count(*) from users"); done = n("select count(*) from sent where key='quiz_done'")
     peer = os.environ.get("PEER_ADMIN", "")
-    rows = lambda data, names: "".join(f"<tr><td>{names.get(k, k)}</td><td class=n>{v}</td><td class=n>{(v/total*100 if total else 0):.0f}%</td></tr>" for k, v in data)
-    return f"""<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+    CAT = {"face": "Обличчя", "body": "Тіло", "hair": "Волосся", "intimate": "Інтимний", "complex": "Комплексний", "": "—"}
+    SRC = {"promo": "попап сайту", "qr": "QR з пакування", "direct": "самі знайшли", "": "—"}
+    GIFTU = {"dila": "Dila −20%", "ship": "Безкошт. доставка", "repeat": "−10% повторне"}
+    CONC = {"early": "Перші зморшки", "dry": "Сухість", "pigment": "Пігментація", "sens": "Чутливість", "mature": "Глибокі зморшки",
+            "good": "Підтримка", "firm": "Пружність", "cellu": "Целюліт", "stretch": "Розтяжки", "oily": "Жирність", "dandruff": "Лупа", "loss": "Випадіння"}
+    pct = lambda a, b: f"{a/b*100:.0f}%" if b else "—"
+    nc = n("select count(*) from users")
+    done = n("select count(*) from sent where key='quiz_done'")
+    ord_all = n("select count(*) from orders")
+    sold = n("select count(*) from orders where status=5")
+    buyers = n("select count(distinct chat_id) from orders")
+    sold_buyers = n("select count(distinct chat_id) from orders where status=5")
+    giftn = n("select count(*) from gifts")
+    phones = n("select count(distinct phone) from orders where coalesce(phone,'')!=''")
+    cards = [("Клієнтів у боті", nc), ("Пройшли квіз", done), ("Замовлень", ord_all),
+             ("Викуплено", sold), ("Подарунків", giftn), ("З телефоном", phones)]
+    tiles = "".join(f"<div class=tile><b>{v}</b><span>{k}</span></div>" for k, v in cards)
+
+    def bars(data, names=None, tot=None):
+        mx = max([r[1] for r in data], default=1) or 1
+        t = tot or sum(r[1] for r in data) or 1
+        return "".join(f"<tr><td>{(names or {}).get(k, k)}</td><td class=n>{v}</td><td class=n>{v/t*100:.0f}%</td><td class=bar><i style=width:{int(v/mx*100)}%></i></td></tr>" for k, v in data) or "<tr><td>—</td></tr>"
+
+    fun = (f"<tr><td>Зайшли в бот</td><td class=n>{nc}</td><td class=n>100%</td></tr>"
+           f"<tr><td>Пройшли квіз</td><td class=n>{done}</td><td class=n>{pct(done, nc)}</td></tr>"
+           f"<tr><td>Зробили замовлення</td><td class=n>{buyers}</td><td class=n>{pct(buyers, nc)}</td></tr>"
+           f"<tr><td><b>Викупили</b></td><td class=n><b>{sold_buyers}</b></td><td class=n><b>{pct(sold_buyers, nc)}</b></td></tr>")
+    cats_h = bars(q("select cat, count(*) from users group by cat order by 2 desc"), CAT)
+    conc_h = bars(q("select concern, count(*) from users where concern!='' group by concern order by 2 desc limit 10"), CONC)
+    src_h = bars(q("select coalesce(nullif(src,''),''), count(*) from users group by 1 order by 2 desc"), SRC)
+    gifts_h = bars(q("select gift, count(*) from gifts group by gift order by 2 desc"), GIFTU)
+    drip = {k: n(f"select count(*) from sent where key='{k}'") for k in ("d2", "d5", "replenish", "cross")}
+    auto = (f"<tr><td>Драйп D+2</td><td class=n>{drip['d2']}</td></tr>"
+            f"<tr><td>Драйп D+5</td><td class=n>{drip['d5']}</td></tr>"
+            f"<tr><td>Поповнення D+50</td><td class=n>{drip['replenish']}</td></tr>"
+            f"<tr><td>Крос-сел D+14</td><td class=n>{drip['cross']}</td></tr>")
+
+    lvlc = {nm: 0 for _, _, nm in LVL}
+    near = []
+    for ph, tot in q("select phone, sum(amount) from orders where status=5 and coalesce(phone,'')!='' group by phone"):
+        tot = tot or 0
+        cur = next(((t, p, nm) for t, p, nm in LVL if tot >= t), None)
+        if cur: lvlc[cur[2]] += 1
+        nxt = ([l for l in reversed(LVL) if tot < l[0]] or [None])[0]
+        if nxt and tot: near.append((ph, tot, nxt[0] - tot, nxt[1]))
+    lvl_rows = "".join(f"<tr><td>{nm}</td><td class=n>{lvlc.get(nm, 0)}</td></tr>" for _, _, nm in LVL)
+    near_rows = "".join(f"<tr><td>{ph}</td><td class=n>{t:,.0f} грн</td><td class=n>{d:,.0f} грн до {p}%</td></tr>".replace(",", " ") for ph, t, d, p in sorted(near, key=lambda x: x[2])[:10]) or "<tr><td>—</td></tr>"
+
+    recent = q("select chat_id, coalesce(nullif(cat,''),'—'), coalesce(nullif(concern,''),'—'), coalesce(nullif(src,''),'—'), datetime(created,'unixepoch','localtime'), (select count(*) from gifts g where g.chat_id=users.chat_id), (select count(*) from orders o where o.chat_id=users.chat_id) from users order by created desc limit 200")
+    rec_rows = "".join(f"<tr><td>{r[0]}</td><td>{CAT.get(r[1], r[1])}</td><td>{CONC.get(r[2], r[2])}</td><td>{SRC.get(r[3], r[3])}</td><td class=n>{r[4][5:16]}</td><td class=n>{r[5]}</td><td class=n>{r[6]}</td></tr>" for r in recent)
+
+    def panel(title, inner, wide=False):
+        return f'<section class="p{" wide" if wide else ""}"><h2>{title}</h2>{inner}</section>'
+    nav = '<div class=nav><a class=on href="#">🌿 AntiAge</a>' + (f'<a href="{peer}">💗 Mamulya</a>' if peer else "") + '</div>'
+    grid = (panel("Воронка · бот → квіз → замовлення → викуп", f"<table>{fun}</table>")
+            + panel("Категорії інтересу (квіз)", f"<table>{cats_h}</table>")
+            + panel("Що турбує (concern)", f"<table>{conc_h}</table>")
+            + panel("Звідки прийшли", f"<table>{src_h}</table>")
+            + panel("Обрані подарунки", f"<table>{gifts_h}</table>")
+            + panel("Автосерії надіслано", f"<table>{auto}</table>")
+            + panel("Рівні лояльності <small>лок. по викуплених</small>", f"<table>{lvl_rows}</table>")
+            + panel("Трішки до рівня", f"<table>{near_rows}</table>")
+            + panel("Останні клієнти", f"<table><tr><th>ID</th><th>Категорія</th><th>Турбує</th><th>Джерело</th><th>Зайшла</th><th>🎁</th><th>Замовл.</th></tr>{rec_rows}</table>", wide=True))
+    return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>AntiAge Bot — кабінет</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>">
-<style>body{{font:13.5px/1.5 "Golos Text",system-ui,sans-serif;margin:0;background:#F2F5F1;color:#22301F;padding:20px}}
-h1{{font-size:19px}}h2{{font-size:13px;color:#5F7057;margin:18px 0 8px}}
-.tile{{display:inline-block;background:#fff;border:1px solid #DFE7DB;border-radius:10px;padding:8px 14px;margin:0 8px 8px 0}}
-.tile b{{display:block;font-size:20px}}.tile span{{font-size:10.5px;color:#93A28C;text-transform:uppercase}}
-table{{border-collapse:collapse;background:#fff;border:1px solid #DFE7DB;border-radius:10px;width:100%;max-width:560px;font-size:12.5px}}
-td{{padding:5px 10px;border-bottom:1px solid #DFE7DB}}td.n{{text-align:right}}a{{color:#4E7A63}}</style>
-<h1>🌿 AntiAge Bot {"· <a href='" + peer + "'>💗 кабінет Mamulya</a>" if peer else ""}</h1>
-<div><span class=tile><b>{total}</b><span>у боті</span></span>
-<span class=tile><b>{done}</b><span>пройшли квіз ({(done/total*100 if total else 0):.0f}%)</span></span></div>
-<h2>Категорії інтересу</h2><table>{rows(cats, CAT)}</table>
-<h2>Звідки прийшли</h2><table>{rows(srcs, {"promo": "попап сайту", "direct": "самі знайшли", "qr": "QR"})}</table>"""
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&display=swap">
+{CAB_CSS}
+<div class=top><h1>🌿 AntiAge Bot</h1><span class=upd>оновлено {time.strftime("%d.%m %H:%M")}</span></div>
+{nav}
+<div class=tiles>{tiles}</div>
+<div class=grid>{grid}</div></html>"""
 
 HTTPServer.allow_reuse_address = True
 class Hook(BaseHTTPRequestHandler):
