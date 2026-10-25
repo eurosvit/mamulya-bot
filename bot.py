@@ -508,6 +508,7 @@ SHOP_BTN = {"mamulya": ("🛍 На Mamulya.lviv", "https://mamulya.lviv.ua"),
 STORE_ARG = {"mamulya": "Mamulya.lviv", "modnamama": "Modnamama", "znana": "Znana Mama"}
 SOLD_F = "status not in (6,7,13,15,8)"
 SPIR_BANNER = os.environ.get("SPIR_BANNER", "https://mamulya-bot.onrender.com/spir.jpg")  # банер офера (бот віддає сам)
+REVIEW_LINK = os.environ.get("REVIEW_LINK", "https://g.page/r/CaKOUgSoR6BJEAE/review")  # пряме посилання на Google-відгук
 _SPIR_IMG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "spirulina-offer.jpg")
 ALLOWED_HOSTS = ("mamulya.lviv.ua", "modnamama.ua", "znanamama.com.ua", "antiagecosmetics.com.ua", "lipoland.fun")
 BASE_URL = os.environ.get("BASE_URL", "https://mamulya-bot.onrender.com").rstrip("/")
@@ -1250,6 +1251,30 @@ def cron():
                 else:
                     DB.commit()
             except Exception as e: print("spiroffer-block", e)
+        # 📝 Прохання про Google-відгук: повторним (≥2 SOLD), SOLD >7д, 5/тиждень, раз на клієнта (gated REVIEW_LIVE=1)
+        if os.environ.get("REVIEW_LIVE") == "1":
+            try:
+                sent7 = DB.execute("select count(*) from sent where key='reviewask' and ts>?", (now - 7 * DAY,)).fetchone()[0]
+                quota = 5 - sent7
+                if quota > 0:
+                    cands = DB.execute(
+                        "select c.chat_id from customers c where coalesce(c.phone,'')!='' "
+                        "and (select count(*) from orders o where o.phone=c.phone and o.status=5) >= 2 "
+                        "and exists(select 1 from orders o where o.phone=c.phone and o.status=5 and o.ts<?) "
+                        "and not exists(select 1 from sent s where s.chat_id=c.chat_id and s.key='reviewask') limit ?",
+                        (now - 7 * DAY, quota)).fetchall()
+                    sn = 0
+                    for (cid,) in cands:
+                        try:
+                            send(cid, personalize(T["reviewask"], cid), [[("Залишити відгук на Google", REVIEW_LINK)]])
+                            DB.execute("insert into sent values(?,?,?)", (cid, "reviewask", now)); sn += 1
+                        except Exception as e: print("reviewask", e)
+                    DB.commit()
+                    if sn:
+                        for a in ADMINS:
+                            try: send(a, f"📝 Прохання про відгук надіслано: <b>{sn}</b> повторним (цього тижня {sent7 + sn}/5)")
+                            except Exception: pass
+            except Exception as e: print("reviewask-block", e)
         for sid, seg, body, btn_s, img in DB.execute("select id,seg,body,btn,coalesce(img,'') from scheduled where done=0 and run_ts<=?", (now,)).fetchall():
             btn = tuple(btn_s.split("|", 1)) if btn_s else None
             excl = {r[0] for r in DB.execute("select chat_id from sched_excl where sid=?", (sid,))}
