@@ -2020,9 +2020,10 @@ class Hook(BaseHTTPRequestHandler):
         if u.path == "/reviewn" and authed:  # аудиторія під прохання відгуку
             n = len(set(resolve_ids("reviewask")))
             rep = DB.execute(
-                "select count(*) from customers c where coalesce(c.phone,'')!='' "
-                "and (select count(*) from orders o where o.phone=c.phone and o.status=5) >= 2 "
-                "and exists(select 1 from orders o where o.phone=c.phone and o.status=5 and o.ts<?)",
+                "select count(*) from (select c.chat_id from customers c "
+                "join orders o on o.phone=c.phone and o.status=5 "
+                "where coalesce(c.phone,'')!='' group by c.chat_id "
+                "having count(*)>=2 and min(o.ts)<?)",
                 (time.time() - 7 * DAY,)).fetchone()[0]
             self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
             self.wfile.write(f"SOLD>7d всього: {n}\nз них повторні (>=2 SOLD): {rep}".encode()); return
