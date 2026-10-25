@@ -357,8 +357,8 @@ def admin_page():
     lvl_rows = "".join(f"<tr><td>{nm}</td><td class=n>{lvlc.get(nm, 0)}</td></tr>" for _, _, nm in LVL)
     near_rows = "".join(f"<tr><td>{ph}</td><td class=n>{t:,.0f} грн</td><td class=n>{d:,.0f} грн до {p}%</td></tr>".replace(",", " ") for ph, t, d, p in sorted(near, key=lambda x: x[2])[:10]) or "<tr><td>—</td></tr>"
 
-    recent = q("select chat_id, coalesce(nullif(cat,''),'—'), coalesce(nullif(concern,''),'—'), coalesce(nullif(src,''),'—'), datetime(created,'unixepoch','localtime'), (select count(*) from gifts g where g.chat_id=users.chat_id), (select count(*) from orders o where o.chat_id=users.chat_id) from users order by created desc limit 200")
-    rec_rows = "".join(f"<tr><td>{r[0]}</td><td>{CAT.get(r[1], r[1])}</td><td>{CONC.get(r[2], r[2])}</td><td>{SRC.get(r[3], r[3])}</td><td class=n>{r[4][5:16]}</td><td class=n>{r[5]}</td><td class=n>{r[6]}</td></tr>" for r in recent)
+    recent = q("select chat_id, coalesce(nullif(cat,''),'—'), coalesce(nullif(concern,''),'—'), coalesce(nullif(src,''),'—'), coalesce(datetime(created,'unixepoch','localtime'),''), (select count(*) from gifts g where g.chat_id=users.chat_id), (select count(*) from orders o where o.chat_id=users.chat_id) from users order by created desc limit 200")
+    rec_rows = "".join(f"<tr><td>{r[0]}</td><td>{CAT.get(r[1], r[1])}</td><td>{CONC.get(r[2], r[2])}</td><td>{SRC.get(r[3], r[3])}</td><td class=n>{(r[4] or '')[5:16]}</td><td class=n>{r[5]}</td><td class=n>{r[6]}</td></tr>" for r in recent)
 
     def panel(title, inner, wide=False):
         return f'<section class="p{" wide" if wide else ""}"><h2>{title}</h2>{inner}</section>'
