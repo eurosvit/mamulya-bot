@@ -2024,7 +2024,7 @@ class Hook(BaseHTTPRequestHandler):
                 "join orders o on o.phone=c.phone and o.status=5 "
                 "where coalesce(c.phone,'')!='' group by c.chat_id "
                 "having count(*)>=2 and min(o.ts)<?)",
-                (time.time() - 7 * DAY,)).fetchone()[0]
+                (time.time() - 7 * 86400,)).fetchone()[0]
             self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
             self.wfile.write(f"SOLD>7d всього: {n}\nз них повторні (>=2 SOLD): {rep}".encode()); return
         if u.path == "/testdeliv" and authed:  # тест листа «забрали»: /testdeliv?key=&to=&total=12000&gift=0
