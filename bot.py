@@ -2677,7 +2677,7 @@ def admin_page():
 <title>Mamulya Bot — кабінет</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
 {CAB_CSS}
-<div class=top><h1>💗 Mamulya Bot</h1><span class=upd>оновлено {time.strftime("%d.%m %H:%M")}</span>
+<div class=top><h1>💗 Mamulya Bot</h1>{("<a class=upd style='margin-left:10px' href='" + os.environ.get("PEER_ANTIAGE", "") + "'>🌿 AntiAge →</a>") if os.environ.get("PEER_ANTIAGE") else ""}<span class=upd>оновлено {time.strftime("%d.%m %H:%M")}</span>
 <span class=upd style=margin-left:auto><a href="/segments.csv?key={AK}">CSV сегментів ↓</a></span></div>
 {_nav("Огляд", AK)}
 <div class=tiles>{"".join(f"<div class=tile><b>{v}</b><span>{k}</span></div>" for k, v in cards)}</div>
