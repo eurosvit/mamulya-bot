@@ -1,7 +1,7 @@
 """Mamulya TG-бот лояльності. Тільки stdlib: long-polling Telegram + HTTP-вебхук SalesDrive + sqlite.
 ENV: BOT_TOKEN, SALESDRIVE_KEY, MEDUSA_URL, MEDUSA_KEY, DILA_CODE, BOT_NAME, PORT
 """
-import json, os, re, sqlite3, threading, time, urllib.request, urllib.parse
+import json, os, re, sqlite3, threading, time, urllib.request, urllib.parse, urllib.error
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 os.environ["TZ"] = "Europe/Kyiv"
 try: time.tzset()
@@ -59,6 +59,8 @@ for _c in ("seo_sold", "seo_rev", "seo_new", "seo_den", "seo_sess", "returned"):
     except Exception: pass
 try: DB.execute("alter table scheduled add column img text default ''")
 except Exception: pass
+try: DB.execute("alter table customers add column blocked real default 0")  # коли заблокував/видалив бота (ts), 0 = активний
+except Exception: pass
 DB.execute("create table if not exists noreply(order_id text primary key, ts real)")  # коли замовлення зайшло в NOREPLY
 DB.execute("create table if not exists spir_ev(kind text, oid text, ts real)")  # трекінг офера спіруліни: open/order/paid
 DB.execute("update customers set src='migrate' where coalesce(src,'')='' and chat_id in (select chat_id from legacy)")
@@ -107,7 +109,23 @@ def send(chat_id, text, buttons=None):
             {"text": t, **({"url": d} if d.startswith("http") else {"callback_data": d})} for t, d in row] for row in buttons]}
     else:
         kw["reply_markup"] = KB  # ponytail: постійна клавіатура на кожному звичайному повідомленні
-    return tg("sendMessage", **kw)
+    try:
+        r = tg("sendMessage", **kw)
+        # дійшло — якщо раніше був позначений заблокованим, знімаємо (пере-підписався)
+        try: DB.execute("update customers set blocked=0 where chat_id=? and blocked!=0", (chat_id,)); DB.commit()
+        except Exception: pass
+        return r
+    except urllib.error.HTTPError as e:
+        # 403 = заблокував/деактивований, 400 chat not found = видалив діалог — позначаємо й прокидаємо далі
+        if e.code in (403, 400):
+            try:
+                desc = (e.read() or b"").decode("utf-8", "ignore").lower()
+            except Exception:
+                desc = ""
+            if "blocked" in desc or "deactivated" in desc or "chat not found" in desc or e.code == 403:
+                try: DB.execute("update customers set blocked=? where chat_id=? and coalesce(blocked,0)=0", (time.time(), chat_id)); DB.commit()
+                except Exception: pass
+        raise
 
 def send_photo(chat_id, path, caption):
     # ponytail: multipart руками, щоб не тягнути requests
@@ -2227,12 +2245,19 @@ def posts_page():
         f"<tr><td>Нагадування день 10 (−10% MALYA10)</td><td class=n>{pr3}</td></tr>"
         f"<tr><td>Замовлень з LOVE7 (−7%)</td><td class=n>{lv_cnt}</td></tr>"
         f"<tr><td>Замовлень з MALYA10 (−10%)</td><td class=n><b>{ml_cnt}</b> · {ml_rev} грн</td></tr></table></section>")
-    # 👥 користувачі бота по магазинах
-    store_rows_c = DB.execute("select coalesce(nullif(store,''),'(не вказано)') st, count(*) c from customers group by st order by c desc").fetchall()
-    storecust_html = ("<section class=p><h2>👥 Користувачі бота по магазинах <small>джерело замовлення, яким клієнт зайшов</small></h2>"
-        "<table><tr><th>Магазин</th><th class=n>Користувачів</th></tr>"
-        + "".join(f"<tr><td>{st}</td><td class=n>{c}</td></tr>" for st, c in store_rows_c) + "</table></section>")
-    cards = [("Розсилок", len(posts)), ("Доставлено", tot_deliv), ("Замовлень після (7д)", tot_ord), ("Оборот, грн", f"{tot_rev:,.0f}".replace(",", " "))]
+    # 👥 користувачі бота по магазинах + 🚫 заблокували
+    store_rows_c = DB.execute(
+        "select coalesce(nullif(store,''),'(не вказано)') st, count(*) c, "
+        "sum(case when coalesce(blocked,0)!=0 then 1 else 0 end) bl "
+        "from customers group by st order by c desc").fetchall()
+    tot_block = DB.execute("select count(*) from customers where coalesce(blocked,0)!=0").fetchone()[0]
+    tot_cust = DB.execute("select count(*) from customers").fetchone()[0]
+    block7 = DB.execute("select count(*) from customers where blocked > ?", (time.time() - 7 * 86400,)).fetchone()[0]
+    storecust_html = ("<section class=p><h2>👥 Користувачі бота по магазинах <small>активні · 🚫 = заблокували/видалили бота</small></h2>"
+        "<table><tr><th>Магазин</th><th class=n>Активних</th><th class=n>🚫 Заблок.</th></tr>"
+        + "".join(f"<tr><td>{st}</td><td class=n>{c - (bl or 0)}</td><td class=n>{bl or 0}</td></tr>" for st, c, bl in store_rows_c) + "</table>"
+        f"<p class=sub>Всього заблокували бот: <b>{tot_block}</b> із {tot_cust} ({tot_block * 100 // tot_cust if tot_cust else 0}%) · за 7 днів: <b>{block7}</b></p></section>")
+    cards = [("Розсилок", len(posts)), ("Доставлено", tot_deliv), ("Замовлень після (7д)", tot_ord), ("Оборот, грн", f"{tot_rev:,.0f}".replace(",", " ")), ("🚫 Заблокували", tot_block)]
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Розсилки — Mamulya Bot</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
