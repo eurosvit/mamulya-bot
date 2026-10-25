@@ -592,6 +592,9 @@ def resolve_ids(seg):
         sql = None
     if sql:
         return [r[0] for r in DB.execute(f"select chat_id from customers c where {sql}")]
+    if seg == "reviewask":  # купили (SOLD) понад тиждень тому — аудиторія під прохання відгуку
+        cut = time.time() - 7 * DAY
+        return [r[0] for r in DB.execute("select distinct c.chat_id from customers c join orders o on o.phone=c.phone and o.phone!='' where o.status=5 and o.ts<?", (cut,))]
     if seg == "lipoland":   # Lipoland як магазин: усі з lipoland.fun (store) + стадія lipoland
         return [r[0] for r in DB.execute("select chat_id from customers where stage='lipoland' or store='Lipoland'")]
     if seg in LIFECYCLE:
@@ -1971,6 +1974,10 @@ class Hook(BaseHTTPRequestHandler):
             threading.Thread(target=retag_stores, daemon=True).start()
             self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
             self.wfile.write("Перепозначення запущено (~5-10 хв). Прийде сповіщення адмінам із кількістю.".encode()); return
+        if u.path == "/reviewn" and authed:  # скільки клієнтів бота з покупкою SOLD >7 днів тому
+            n = len(set(resolve_ids("reviewask")))
+            self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
+            self.wfile.write(str(n).encode()); return
         if u.path == "/testdeliv" and authed:  # тест листа «забрали»: /testdeliv?key=&to=&total=12000&gift=0
             to = qs.get("to", [""])[0].strip()
             total = float(qs.get("total", ["12000"])[0] or 0)
