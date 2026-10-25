@@ -24,6 +24,8 @@ services:
         sync: false
       - key: ADMIN_KEY
         sync: false
+      - key: PEER_ANTIAGE
+        sync: false
   - type: web
     name: antiage-bot
     runtime: python
