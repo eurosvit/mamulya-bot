@@ -527,9 +527,10 @@ def track_url(url, pid, cid, seg):
     # UTM + редирект через Worker (CLICK_BASE) або /r бота; клієнтський лінк не залежить від рестартів бота
     url = add_utm(url, seg)
     if not url.startswith("http"): return url
-    # лінки на сам бот (напр. /spir) не ганяємо через воркер: його нема в allowlist воркера,
-    # і сенсу нема — сторінку хостить сам бот. Віддаємо прямий лінк.
-    if urllib.parse.urlparse(url).hostname == urllib.parse.urlparse(BASE_URL).hostname:
+    # лінки на сам бот (напр. /spir) чи зовнішні довірені (Google-відгук g.page) не ганяємо
+    # через воркер — його allowlist лише наші магазини, інакше він кине на головну.
+    host = urllib.parse.urlparse(url).hostname or ""
+    if host == (urllib.parse.urlparse(BASE_URL).hostname or "") or host.endswith("g.page") or host.endswith("google.com"):
         return url
     return f"{CLICK_BASE}?p={pid}&c={cid}&u={urllib.parse.quote(url, safe='')}"
 
