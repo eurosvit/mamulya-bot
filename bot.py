@@ -158,9 +158,36 @@ MAIL_REPLY = os.environ.get("MAIL_REPLY", "mamulyashopping@gmail.com")  # куд
 
 LAST_MAIL_ERR = ""
 
+# ponytail: виправляємо ТІЛЬКИ явні, неіснуючі-як-домен описки ДО відправки (gmaill.com → баунс).
+# Словник, а не евристика відстані: та зачіпала б реальні домени (ymail.com Yahoo → gmail.com = мис-сенд). Дописати новий варіант — рядок сюди.
+MAIL_TYPO = {
+    "gmaill.com": "gmail.com", "gmai.com": "gmail.com", "gmial.com": "gmail.com", "gmil.com": "gmail.com",
+    "gmal.com": "gmail.com", "gmali.com": "gmail.com", "gmaul.com": "gmail.com", "gnail.com": "gmail.com",
+    "gmails.com": "gmail.com", "gmaik.com": "gmail.com", "gmaail.com": "gmail.com",
+    "gmail.co": "gmail.com", "gmail.con": "gmail.com", "gmail.cm": "gmail.com", "gmail.om": "gmail.com",
+    "gmail.comm": "gmail.com", "gmail.ocm": "gmail.com", "gmailc.om": "gmail.com", "gmail.ua": "gmail.com",
+    "ukr.ne": "ukr.net", "ukr.nt": "ukr.net", "ukr.met": "ukr.net", "ukrr.net": "ukr.net",
+    "outlok.com": "outlook.com", "hotmai.com": "hotmail.com",
+    "hotmial.com": "hotmail.com", "hotmaill.com": "hotmail.com", "yaho.com": "yahoo.com", "iclod.com": "icloud.com",
+}
+
+def fix_email(addr):
+    addr = (addr or "").strip()
+    if "@" not in addr: return addr
+    local, _, dom = addr.rpartition("@")
+    fixed = MAIL_TYPO.get(dom.lower().strip())
+    return f"{local}@{fixed}" if fixed else addr
+
+assert fix_email("kseniasaulak@gmaill.com") == "kseniasaulak@gmail.com"
+assert fix_email("a@gmial.com") == "a@gmail.com" and fix_email("a@ukr.ne") == "a@ukr.net"
+assert fix_email("a@gmail.com") == "a@gmail.com" and fix_email("a@ymail.com") == "a@ymail.com"
+assert fix_email("a@mycompany.com") == "a@mycompany.com" and fix_email("bad") == "bad"
+
 def send_email(to, subject, html):
     # транзакційний лист через Resend; тихо вимкнено, якщо нема RESEND_API_KEY
     global LAST_MAIL_ERR
+    orig = to; to = fix_email(to)
+    if to != orig: print("email-fixed", orig, "->", to)  # лог, щоб можна було поправити й у SalesDrive
     key = os.environ.get("RESEND_API_KEY", "")
     if not key or "@" not in (to or ""):
         LAST_MAIL_ERR = "no key or bad email"; return False
