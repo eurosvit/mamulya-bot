@@ -68,6 +68,8 @@ DB.execute("update customers set src='sms' where coalesce(src,'')='' and coalesc
 DB.execute("update orders set store='Mamulya.lviv' where store='Mamulya'")
 DB.execute("update customers set store='Mamulya.lviv' where store='Mamulya'")
 DAY = 86400
+PREG_FLOW_START = 1792886400  # 2026-10-25: корисні статті (pz1/pz2) — тільки лідам, що зайшли від цієї дати; старих беремо окремою розсилкою
+PREG_FLOW_NEW = {"pz1", "pz2"}
 
 # ---------- helpers ----------
 # Усі посилання на наші магазини йдуть із міткою джерела: у SalesDrive заведена
@@ -729,7 +731,7 @@ def on_text(chat_id, text):
     if t == "🛍 Добірка для малюка":
         row = DB.execute("select stage from customers where chat_id=?", (chat_id,)).fetchone()
         st = row[0] if row and row[0] in LIFECYCLE else "unknown"
-        url = next((u for _, k, _, u in LIFECYCLE.get(st, []) if u and "modnamama" in u), "https://modnamama.ua")
+        url = next((u for _, k, _, u, *_ in LIFECYCLE.get(st, []) if u and "modnamama" in u), "https://modnamama.ua")
         return send(chat_id, STAGE_PITCH.get(st, T["stage_link"]) + "\n\nЗібрали все в одному місці 👇", [[("Відкрити добірку", url)]])
     if t == "💬 Менеджер":
         return send_support(chat_id)
@@ -740,8 +742,8 @@ def on_text(chat_id, text):
         DB.execute("insert or replace into customers(chat_id,order_id,phone,stage,created) values(?,?,?,?,?)", (chat_id, "demo", "", st, time.time())); DB.execute("delete from gifts where chat_id=?", (chat_id,)); DB.commit()
         send(chat_id, "Дякуємо за замовлення 💗 Ми підготували подарунки — оберіть два, які вам зараз корисні.")
         show_menu(chat_id, st)
-        for days, key, text, url in LIFECYCLE[st]:
-            send(chat_id, f"⏰ <i>через {days} дн:</i>\n{text}", [[("Подивитись", url)]] if url else None)
+        for days, key, text, url, *rest in LIFECYCLE[st]:
+            send(chat_id, f"⏰ <i>через {days} дн:</i>\n{text}", [[(rest[0] if rest else "Подивитись", url)]] if url else None)
         return
     if chat_id in ADMINS and t == "/stats":
         n = lambda q: DB.execute(q).fetchone()[0]
@@ -1181,10 +1183,12 @@ def cron():
                 DB.execute("update customers set stage=? where chat_id=?", (st, chat_id))
         DB.commit()
         for chat_id, stage, created, store in DB.execute("select chat_id,stage,created,coalesce(store,'') from customers where picked>=0"):
-            for days, key, text, url in LIFECYCLE.get(stage, []):
+            for days, key, text, url, *rest in LIFECYCLE.get(stage, []):
+                label = rest[0] if rest else "Подивитись"  # 5-й елемент тупла = напис кнопки (статті → «Читати статтю»)
                 if key == "p3" and store == "Znana Mama": continue  # ponytail: не рекламуємо Znana її ж покупцям
+                if key in PREG_FLOW_NEW and created < PREG_FLOW_START: continue  # нові корисні статті — тільки новим лідам
                 if now - created >= days * DAY and not DB.execute("select 1 from sent where chat_id=? and key=?", (chat_id, key)).fetchone():
-                    try: send(chat_id, text, [[("Подивитись", add_utm(url, "lifecycle"))]] if url else None)
+                    try: send(chat_id, text, [[(label, add_utm(url, "lifecycle"))]] if url else None)
                     except Exception as e: print("send", e)
                     DB.execute("insert into sent values(?,?,?)", (chat_id, key, now))
         for code, chat_id, exp in DB.execute("select code,chat_id,expires from coupons where reminded=0 and expires-? < ?", (now, 5 * DAY)):
@@ -1262,10 +1266,7 @@ def cron():
                                      (now, "postpartum", "🌿 Спіруліна-офер (авто, 10 днів після покупки) · воронка в секції 🌿")).lastrowid
                     for cid in sent_cids:
                         DB.execute("insert or ignore into sent values(?,?,?)", (cid, f"post:{pid}", now))
-                    DB.commit()
-                    for a in ADMINS:
-                        try: send(a, f"🌿 Авто-офер спіруліни надіслано: <b>{len(sent_cids)}</b> клієнтам (рядок у Розсилках)")
-                        except Exception: pass
+                    DB.commit()  # авто-флоу — без сповіщень адмінам (видно в дашборді /posts)
                 else:
                     DB.commit()
             except Exception as e: print("spiroffer-block", e)
