@@ -2027,6 +2027,13 @@ class Hook(BaseHTTPRequestHandler):
                 (time.time() - 7 * 86400,)).fetchone()[0]
             self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
             self.wfile.write(f"SOLD>7d всього: {n}\nз них повторні (>=2 SOLD): {rep}".encode()); return
+        if u.path == "/segn" and authed:  # розмір сегмента(ів): /segn?seg=pregnant&seg=m0_3+m3_6
+            out = []
+            for s in qs.get("seg", []):
+                try: out.append(f"{s}: {len(set(resolve_ids(s)))}")
+                except Exception as e: out.append(f"{s}: ERR {e}")
+            self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
+            self.wfile.write(("\n".join(out) or "дай ?seg=").encode()); return
         if u.path == "/testdeliv" and authed:  # тест листа «забрали»: /testdeliv?key=&to=&total=12000&gift=0
             to = qs.get("to", [""])[0].strip()
             total = float(qs.get("total", ["12000"])[0] or 0)
