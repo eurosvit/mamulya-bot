@@ -1288,11 +1288,7 @@ def cron():
                             send(cid, personalize(T["reviewask"], cid), [[("Залишити відгук на Google", REVIEW_LINK)]])
                             DB.execute("insert into sent values(?,?,?)", (cid, "reviewask", now)); sn += 1
                         except Exception as e: print("reviewask", e)
-                    DB.commit()
-                    if sn:
-                        for a in ADMINS:
-                            try: send(a, f"📝 Прохання про відгук надіслано: <b>{sn}</b> повторним (цього тижня {sent7 + sn}/5)")
-                            except Exception: pass
+                    DB.commit()  # авто-флоу — без сповіщень адмінам (видно в дашборді /posts)
             except Exception as e: print("reviewask-block", e)
         for sid, seg, body, btn_s, img in DB.execute("select id,seg,body,btn,coalesce(img,'') from scheduled where done=0 and run_ts<=?", (now,)).fetchall():
             btn = tuple(btn_s.split("|", 1)) if btn_s else None
