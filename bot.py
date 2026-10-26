@@ -931,8 +931,7 @@ def on_callback(cb):
     if data == "reviewdone":  # клієнт лишив Google-відгук → веде надіслати скрін Оксані (виплата 150 грн вручну)
         return tg("sendMessage", chat_id=chat_id, parse_mode="HTML", text=T["review_done"],
                   reply_markup={"inline_keyboard": [
-                      [{"text": "💬 Написати Оксані (Telegram)", "url": "https://t.me/+380636324010"}],
-                      [{"text": "💚 WhatsApp", "url": "https://wa.me/380636324010"}]]})
+                      [{"text": "💬 Написати менеджеру (Telegram)", "url": "https://t.me/+380636324010"}]]})
     if data.startswith("gift:"):
         give(chat_id, data[5:])
         stage = DB.execute("select stage from customers where chat_id=?", (chat_id,)).fetchone()[0]
