@@ -336,7 +336,7 @@ def cron():
                         DB.execute("insert into sent values(?,?,?)", (chat_id, key, now))
                     except Exception as e: print("drip", e)
         # unpaid-nudge: дотиск неоплачених/непідтверджених (статус NEW); # ponytail: live-перевірка статусу на кожен NEW-ордер щогодини, при обсязі — рідше
-        for order_id, chat_id, ts0, st in DB.execute("select order_id, chat_id, ts, status from orders where status in (0,1)"):
+        for order_id, chat_id, ts0, st in (DB.execute("select order_id, chat_id, ts, status from orders where status in (0,1)") if os.environ.get("ANTIAGE_NUDGE") else []):
             for hrs, key, text in NUDGES:
                 k = f"{key}:{order_id}"
                 if now - ts0 >= hrs * 3600 and not DB.execute("select 1 from sent where chat_id=? and key=?", (chat_id, k)).fetchone():
