@@ -19,11 +19,22 @@ create table if not exists posts(id integer primary key autoincrement, ts real, 
 create table if not exists orders(order_id text primary key, chat_id int, phone text, amount real, ts real, status int, replenish real);
 create table if not exists gifts(chat_id int primary key, gift text, ts real);
 create table if not exists msgs(id integer primary key autoincrement, chat_id int, dir text, text text, ts real);
+create table if not exists shelf(id integer primary key autoincrement, chat_id int, order_id text, product text, category text, days int, opened real default 0, remind real default 0, reminded int default 0, ts real);
 """)
 DAY = 86400
 SITE = "https://antiagecosmetics.com.ua"
 SD_KEY = os.environ.get("SALESDRIVE_KEY", "")
 REPLENISH_DAYS = 50  # крем/сироватка ~1,5-2 міс — нагадування про поповнення
+SHELF_KW = [("сироватк", 45), ("ампул", 30), ("маск", 90), ("скраб", 120), ("пілінг", 90), ("вмива", 90), ("пінк", 90), ("міцеляр", 60), ("гель для душу", 30), ("тонік", 60), ("тонер", 60), ("крем", 60), ("spf", 60), ("сонцезахис", 60), ("олі", 90), ("шампун", 60), ("кондиціонер", 75), ("бальзам", 75), ("інтим", 60)]
+SHELF_LEAD = 10  # нагадати за N днів до кінця; # ponytail: груба евристика терміну по назві, уточнимо по обʼєму товару пізніше
+def shelf_days(name):
+    n = (name or "").lower()
+    for kw, dd in SHELF_KW:
+        if kw in n: return kw, dd
+    return "", REPLENISH_DAYS
+def short_prod(name):
+    name = (name or "").strip()
+    return name if len(name) <= 44 else name[:43] + "…"
 LVL = [(25000, 10, "Діамант"), (15000, 7, "VIP"), (9000, 5, "Смарт"), (4500, 3, "Базовий")]
 
 def norm_phone(p):
@@ -148,7 +159,7 @@ def send(chat_id, text, buttons=None):
         kw["reply_markup"] = {"inline_keyboard": [[
             {"text": t, **({"url": d} if d.startswith("http") else {"callback_data": d})} for t, d in row] for row in buttons]}
     else:
-        kw["reply_markup"] = {"keyboard": [[{"text": "🎁 Мій промокод"}, {"text": "🛍 Каталог"}], [{"text": "🔄 Пройти підбір заново"}, {"text": "💬 Підтримка"}]],
+        kw["reply_markup"] = {"keyboard": [[{"text": "🎁 Мій промокод"}, {"text": "🛍 Каталог"}], [{"text": "🧴 Моя полиця"}, {"text": "🔄 Пройти підбір заново"}], [{"text": "💬 Підтримка"}]],
                               "resize_keyboard": True, "is_persistent": True}
     return tg("sendMessage", **kw)
 
@@ -166,6 +177,42 @@ def on_start(chat_id, arg):
         return after_purchase(chat_id, arg)
     start_quiz(chat_id)
 
+def seed_shelf(chat_id, order_id, order):
+    added = []
+    for p in ((order or {}).get("products") or []):
+        name = (p.get("text") or "").strip()
+        if not name or not (p.get("sku") or "").strip() or name.upper() == "КУПОН":
+            continue
+        if DB.execute("select 1 from shelf where chat_id=? and order_id=? and product=?", (chat_id, order_id, name)).fetchone():
+            continue
+        cat, dd = shelf_days(name)
+        DB.execute("insert into shelf(chat_id,order_id,product,category,days,opened,remind,reminded,ts) values(?,?,?,?,?,0,0,0,?)",
+                   (chat_id, order_id, name, cat, dd, time.time()))
+        added.append(name)
+    DB.commit()
+    return added
+
+def shelf_prompt(chat_id, added):
+    if added:
+        send(chat_id, "🧴 Додав до вашої полиці догляду: <b>" + ", ".join(short_prod(a) for a in added) + "</b>.\n"
+             "Коли почнете користуватись — відкрийте «🧴 Моя полиця» і тицьніть «✅ Відкрила» біля засобу. Я нагадаю, коли час докупити 💧")
+
+def shelf_view(chat_id):
+    rows = DB.execute("select id, product, opened, days from shelf where chat_id=? order by ts desc limit 15", (chat_id,)).fetchall()
+    if not rows:
+        return send(chat_id, "🧴 Ваша полиця догляду поки порожня.\nЗасоби зʼявляться тут після замовлення — і я нагадаю, коли час докупити 💛")
+    now = time.time(); lines = ["🧴 <b>Ваша полиця догляду</b>\n"]; btns = []
+    for rid, prod, opened, days in rows:
+        sp = short_prod(prod)
+        if not opened:
+            lines.append(f"• {sp}\n   <i>ще не відкрито</i>")
+            btns.append([(f"✅ Відкрила: {prod[:16]}", f"sh:o:{rid}")])
+        else:
+            left = int((opened + (days or REPLENISH_DAYS) * DAY - now) / DAY)
+            lines.append(f"• {sp}\n   лишилось ~{max(left, 0)} дн.")
+            btns.append([(f"✔ Закінчився: {prod[:14]}", f"sh:d:{rid}")])
+    return send(chat_id, "\n".join(lines), btns)
+
 def after_purchase(chat_id, order_id):
     o = sd_order(order_id)
     phone = norm_phone((o.get("contacts") or [{}])[0].get("phone", [""])[0]) if o and isinstance(o.get("contacts"), list) else ""
@@ -178,6 +225,7 @@ def after_purchase(chat_id, order_id):
     if ll: send(chat_id, ll)
     if status == 5:
         gift_menu(chat_id)
+        shelf_prompt(chat_id, seed_shelf(chat_id, order_id, o))
     else:
         send(chat_id, "А поки — підкажу, як доглядати за шкірою правильно 💧 Щойно отримаєте посилку, на вас чекатиме подарунок 🎁")
 
@@ -194,6 +242,18 @@ def on_callback(cb):
     tg("answerCallbackQuery", callback_query_id=cb["id"])
     if data.startswith("gift:"):
         return give_gift(chat_id, data[5:])
+    if data.startswith("sh:o:"):
+        rid = data[5:]
+        r = DB.execute("select days from shelf where id=? and chat_id=?", (rid, chat_id)).fetchone()
+        if r:
+            dd = r[0] or REPLENISH_DAYS; now = time.time()
+            DB.execute("update shelf set opened=?, remind=?, reminded=0 where id=? and chat_id=?",
+                       (now, now + max(dd - SHELF_LEAD, 7) * DAY, rid, chat_id)); DB.commit()
+            send(chat_id, f"Прийнято 💛 Нагадаю приблизно за {SHELF_LEAD} днів до того, як засіб закінчиться — щоб ви докупили без паузи в догляді.")
+        return
+    if data.startswith("sh:d:"):
+        DB.execute("delete from shelf where id=? and chat_id=?", (data[5:], chat_id)); DB.commit()
+        return send(chat_id, "Прибрав із полиці ✅ Докупите — додам знову автоматично.")
     if data.startswith("q1:"):
         cat = data[3:]
         DB.execute("update users set cat=? where chat_id=?", (cat, chat_id)); DB.commit()
@@ -231,6 +291,8 @@ def on_text(chat_id, t):
         return send(chat_id, "Обирайте: обличчя, тіло, волосся, інтимний догляд 💛", [[("Відкрити каталог", SITE)]])
     if t == "🔄 Пройти підбір заново":
         return start_quiz(chat_id)
+    if t == "🧴 Моя полиця":
+        return shelf_view(chat_id)
     if t == "💬 Підтримка":
         return send(chat_id, "Напишіть нам — підкажемо із засобом і складом 💛\n📩 Instagram/сайт: antiagecosmetics.com.ua\n🕐 Пн–Пт 10:00–17:00")
     send(chat_id, "Натисніть кнопку внизу — або «🔄 Пройти підбір заново», щоб отримати рекомендації 😊")
@@ -280,7 +342,8 @@ def cron():
                     except Exception as e: print("drip", e)
         # поповнення + крос-сел за датою SOLD
         for chat_id, rep in DB.execute("select chat_id, replenish from orders where replenish>0 and replenish<=?", (now,)):
-            if not DB.execute("select 1 from sent where chat_id=? and key='replenish'", (chat_id,)).fetchone():
+            using_shelf = DB.execute("select 1 from shelf where chat_id=? and opened>0 limit 1", (chat_id,)).fetchone()
+            if not using_shelf and not DB.execute("select 1 from sent where chat_id=? and key='replenish'", (chat_id,)).fetchone():
                 ph_ = (DB.execute("select phone from orders where chat_id=? order by ts desc limit 1", (chat_id,)).fetchone() or [""])[0]
                 try:
                     send(chat_id, replenish_text(ph_), [[("🛍 Поповнити запас", SITE)]])
@@ -293,6 +356,13 @@ def cron():
                     send(chat_id, CROSS_TEXT, [[("🌿 Каталог", SITE)]])
                     DB.execute("insert into sent values(?,?,?)", (chat_id, "cross", now))
                 except Exception as e: print("cross", e)
+        # полиця: по-товарні нагадування про докупівлю
+        for chat_id, rid, prod, ph_ in DB.execute("select s.chat_id, s.id, s.product, (select phone from orders o where o.chat_id=s.chat_id order by o.ts desc limit 1) from shelf s where s.opened>0 and s.remind>0 and s.remind<=? and s.reminded=0", (now,)):
+            try:
+                ll = level_line(ph_ or "")
+                send(chat_id, f"🧴 Ваш засіб <b>{short_prod(prod)}</b> скоро закінчиться 💧 Час поповнити, щоб не переривати догляд." + ("\n\n" + ll if ll else ""), [[("🛍 Докупити", SITE)]])
+                DB.execute("update shelf set reminded=1 where id=?", (rid,))
+            except Exception as e: print("shelf-remind", e)
         DB.commit()
         time.sleep(3600)
 
@@ -428,6 +498,12 @@ def client_page(cid):
     gift_rows = "".join(f"<tr><td>{GIFTU.get(g[0], g[0])}</td><td class=n>{g[1][:16]}</td></tr>" for g in gifts) or "<tr><td>—</td></tr>"
     sent = DB.execute("select key, coalesce(datetime(ts,'unixepoch','localtime'),'') from sent where chat_id=? order by ts", (ci,)).fetchall()
     sent_rows = "".join(f"<tr><td>{KEYU.get(s[0], s[0])}</td><td class=n>{s[1][:16]}</td></tr>" for s in sent if not s[0].startswith('post:')) or "<tr><td>—</td></tr>"
+    shelf = DB.execute("select product, category, opened, days, reminded from shelf where chat_id=? order by ts desc", (ci,)).fetchall()
+    def shst(o2, d2, r2):
+        if not o2: return "не відкрито"
+        if r2: return "нагадано докупити"
+        return f"лишилось ~{max(int((o2 + (d2 or REPLENISH_DAYS) * DAY - time.time()) / DAY), 0)} дн."
+    shelf_rows = "".join(f"<tr><td>{(p or '')[:46]}</td><td>{c or '—'}</td><td>{shst(o2, d2, r2)}</td></tr>" for p, c, o2, d2, r2 in shelf) or "<tr><td>—</td></tr>"
     msgs = DB.execute("select dir, text, coalesce(datetime(ts,'unixepoch','localtime'),'') from msgs where chat_id=? order by ts desc limit 300", (ci,)).fetchall()
     msg_rows = "".join(f"<tr><td class=n style='white-space:nowrap;color:#93A28C'>{m[2][5:16]}</td><td style='white-space:nowrap'>{'→ бот' if m[0]=='out' else '← клієнт'}</td><td>{esc(m[1])[:500]}</td></tr>" for m in msgs) or "<tr><td colspan=3 style='color:#93A28C'>Поки порожньо — логування щойно увімкнено, накопичуватиметься з нових повідомлень.</td></tr>"
     def panel(title, inner, wide=False):
@@ -436,6 +512,7 @@ def client_page(cid):
             + panel("Замовлення", f"<table>{ord_rows}</table>")
             + panel("Подарунки", f"<table>{gift_rows}</table>")
             + panel("Отримані автосерії", f"<table>{sent_rows}</table>")
+            + panel("🧴 Полиця догляду", f"<table>{shelf_rows}</table>")
             + panel("Історія переписки <small>останні 300</small>", f"<table>{msg_rows}</table>", wide=True))
     top = f"<div class=top><h1>🌿 Клієнт {ci}</h1><span class=upd>{phone or ''}</span></div>"
     return head + top + back + f"<div class=grid>{grid}</div></html>"
@@ -458,6 +535,7 @@ class Hook(BaseHTTPRequestHandler):
                     ll = level_line(phone)
                     if ll: send(cid, ll)
                     gift_menu(cid)
+                    shelf_prompt(cid, seed_shelf(cid, oid, sd_order(oid)))
                 elif status in (6, 13):
                     DB.execute("update orders set replenish=0 where order_id=?", (oid,))
                 DB.commit()
