@@ -2315,11 +2315,14 @@ def posts_page():
     rev_all = DB.execute("select count(distinct c.chat_id) from customers c join orders o on o.phone=c.phone and o.phone!='' where o.status=5 and o.ts<? and not exists(select 1 from sent s where s.chat_id=c.chat_id and s.key='reviewask')", (_rcut,)).fetchone()[0]
     _dtt = (2 - time.localtime().tm_wday) % 7
     _next_wed = time.strftime("%d.%m", time.localtime(time.time() + _dtt * 86400))
-    review_html = ("<section class=p><h2>📝 Прохання про Google-відгук <small>авто · щосереди ≤5 · кешбек 150 грн</small></h2>"
-        f"<p class=sub>Статус: <b>{'🟢 увімкнено' if rev_live else '🔴 вимкнено'}</b> · наступна вибірка: <b>{_next_wed}</b> · надіслано всього: <b>{rev_sent}</b></p>"
-        "<table><tr><th>Черга</th><th class=n>Лишилось</th></tr>"
-        f"<tr><td>Повторні (йдуть першими)</td><td class=n>{rev_rep}</td></tr>"
-        f"<tr><td>Усі покупці SOLD&gt;7д (потім)</td><td class=n>{rev_all}</td></tr></table></section>")
+    _rep_wk = -(-rev_rep // 5) if rev_rep else 0   # ceil: скільки серед піде на повторних
+    _all_wk = -(-rev_all // 5) if rev_all else 0
+    review_html = ("<section class=p><h2>📝 Прохання про Google-відгук <small>авто · кешбек 150 грн</small></h2>"
+        f"<p class=sub>Статус: <b>{'🟢 увімкнено' if rev_live else '🔴 вимкнено'}</b> · надсилаємо <b>по 5 осіб щосереди</b> (кожному 1 раз) · наступна: <b>{_next_wed}</b> · надіслано всього: <b>{rev_sent}</b></p>"
+        "<table><tr><th>Черга — кому ще не слали</th><th class=n>Осіб</th><th class=n>≈ серед по 5</th></tr>"
+        f"<tr><td>Спочатку повторні</td><td class=n>{rev_rep}</td><td class=n>{_rep_wk}</td></tr>"
+        f"<tr><td>Усього в черзі (разом)</td><td class=n>{rev_all}</td><td class=n>{_all_wk}</td></tr></table>"
+        "<p class=sub>Йдуть по 5 щосереди: спершу повторні, коли закінчаться — автоматично решта покупців.</p></section>")
     cards = [("Розсилок", len(posts)), ("Доставлено", tot_deliv), ("Замовлень після (7д)", tot_ord), ("Оборот, грн", f"{tot_rev:,.0f}".replace(",", " ")), ("🚫 Заблокували", tot_block)]
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Розсилки — Mamulya Bot</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
