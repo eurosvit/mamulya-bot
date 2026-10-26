@@ -2307,6 +2307,19 @@ def posts_page():
         "<table><tr><th>Магазин</th><th class=n>Активних</th><th class=n>🚫 Заблок.</th></tr>"
         + "".join(f"<tr><td>{st}</td><td class=n>{c - (bl or 0)}</td><td class=n>{bl or 0}</td></tr>" for st, c, bl in store_rows_c) + "</table>"
         f"<p class=sub>Всього заблокували бот: <b>{tot_block}</b> із {tot_cust} ({tot_block * 100 // tot_cust if tot_cust else 0}%) · за 7 днів: <b>{block7}</b></p></section>")
+    # 📝 статус дрипу прохань про Google-відгук
+    rev_live = os.environ.get("REVIEW_LIVE") == "1"
+    rev_sent = DB.execute("select count(*) from sent where key='reviewask'").fetchone()[0]
+    _rcut = time.time() - 7 * 86400
+    rev_rep = DB.execute("select count(*) from (select c.chat_id from customers c join orders o on o.phone=c.phone and o.phone!='' and o.status=5 where coalesce(c.phone,'')!='' and not exists(select 1 from sent s where s.chat_id=c.chat_id and s.key='reviewask') group by c.chat_id having count(*)>=2 and min(o.ts)<?)", (_rcut,)).fetchone()[0]
+    rev_all = DB.execute("select count(distinct c.chat_id) from customers c join orders o on o.phone=c.phone and o.phone!='' where o.status=5 and o.ts<? and not exists(select 1 from sent s where s.chat_id=c.chat_id and s.key='reviewask')", (_rcut,)).fetchone()[0]
+    _dtt = (1 - time.localtime().tm_wday) % 7
+    _next_tue = time.strftime("%d.%m", time.localtime(time.time() + _dtt * 86400))
+    review_html = ("<section class=p><h2>📝 Прохання про Google-відгук <small>авто · щовівторка ≤5 · кешбек 150 грн</small></h2>"
+        f"<p class=sub>Статус: <b>{'🟢 увімкнено' if rev_live else '🔴 вимкнено'}</b> · наступна вибірка: <b>{_next_tue}</b> · надіслано всього: <b>{rev_sent}</b></p>"
+        "<table><tr><th>Черга</th><th class=n>Лишилось</th></tr>"
+        f"<tr><td>Повторні (йдуть першими)</td><td class=n>{rev_rep}</td></tr>"
+        f"<tr><td>Усі покупці SOLD&gt;7д (потім)</td><td class=n>{rev_all}</td></tr></table></section>")
     cards = [("Розсилок", len(posts)), ("Доставлено", tot_deliv), ("Замовлень після (7д)", tot_ord), ("Оборот, грн", f"{tot_rev:,.0f}".replace(",", " ")), ("🚫 Заблокували", tot_block)]
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Розсилки — Mamulya Bot</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
@@ -2323,6 +2336,7 @@ def posts_page():
 <section class="p wide"><h2>📧 Авто-листи <small>відкриття приблизні (Gmail проксує картинки) · «перейшли в бот» і «нові» — точні</small></h2>
 <table><tr><th>Лист</th><th class=n>Надіслано</th><th class=n>Відкрито</th><th class=n>Клікнули</th><th class=n>Перейшли в бот</th><th class=n>Нові (догнали листом)</th></tr>{mail_rows or '<tr><td>ще нема даних — зʼявиться після перших листів клієнтам</td></tr>'}</table></section>
 {spir_html}
+{review_html}
 {storecust_html}
 <section class="p wide"><h2>Заплановані <small>бот надішле сам у вказаний час · керування: <code>/schedule</code> у боті</small></h2>
 <table><tr><th>ID</th><th>Коли</th><th>Сегмент</th><th>Статус</th><th>Отримувачі</th><th>Текст</th></tr>{sched_rows or '<tr><td>нема запланованих — додайте <code>/schedule ДД.ММ ГГ:ХХ сегмент текст</code></td></tr>'}</table></section>
