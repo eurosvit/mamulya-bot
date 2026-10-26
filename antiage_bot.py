@@ -18,6 +18,7 @@ create table if not exists sent(chat_id int, key text, ts real, primary key(chat
 create table if not exists posts(id integer primary key autoincrement, ts real, text text);
 create table if not exists orders(order_id text primary key, chat_id int, phone text, amount real, ts real, status int, replenish real);
 create table if not exists gifts(chat_id int primary key, gift text, ts real);
+create table if not exists msgs(id integer primary key autoincrement, chat_id int, dir text, text text, ts real);
 """)
 DAY = 86400
 SITE = "https://antiagecosmetics.com.ua"
@@ -135,7 +136,13 @@ def tg(method, **kw):
     req = urllib.request.Request(API + method, json.dumps(kw).encode(), {"Content-Type": "application/json"})
     return json.load(urllib.request.urlopen(req, timeout=30))
 
+def log_msg(chat_id, direction, text):
+    try:
+        DB.execute("insert into msgs(chat_id,dir,text,ts) values(?,?,?,?)", (chat_id, direction, text, time.time())); DB.commit()
+    except Exception as e: print("log_msg", e)
+
 def send(chat_id, text, buttons=None):
+    log_msg(chat_id, "out", text)
     kw = dict(chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
     if buttons:
         kw["reply_markup"] = {"inline_keyboard": [[
@@ -234,9 +241,10 @@ def poll():
         try:
             for u in tg("getUpdates", offset=offset, timeout=50)["result"]:
                 offset = u["update_id"] + 1
-                if "callback_query" in u: on_callback(u["callback_query"])
+                if "callback_query" in u:
+                    cb = u["callback_query"]; log_msg(cb["message"]["chat"]["id"], "in", "[кнопка] " + cb.get("data", "")); on_callback(cb)
                 elif "message" in u and "text" in u["message"]:
-                    m = u["message"]; txt = m["text"]
+                    m = u["message"]; txt = m["text"]; log_msg(m["chat"]["id"], "in", txt)
                     if txt.startswith("/start"): on_start(m["chat"]["id"], txt.split(" ", 1)[1] if " " in txt else "")
                     else: on_text(m["chat"]["id"], txt)
         except Exception as e:
@@ -309,6 +317,7 @@ def admin_page():
     q = lambda sql: DB.execute(sql).fetchall()
     n = lambda sql: q(sql)[0][0]
     peer = os.environ.get("PEER_ADMIN", "")
+    AK = os.environ.get("ADMIN_KEY", "")
     CAT = {"face": "Обличчя", "body": "Тіло", "hair": "Волосся", "intimate": "Інтимний", "complex": "Комплексний", "": "—"}
     SRC = {"promo": "попап сайту", "qr": "QR з пакування", "direct": "самі знайшли", "": "—"}
     GIFTU = {"dila": "Dila −20%", "ship": "Безкошт. доставка", "repeat": "−10% повторне"}
@@ -358,7 +367,7 @@ def admin_page():
     near_rows = "".join(f"<tr><td>{ph}</td><td class=n>{t:,.0f} грн</td><td class=n>{d:,.0f} грн до {p}%</td></tr>".replace(",", " ") for ph, t, d, p in sorted(near, key=lambda x: x[2])[:10]) or "<tr><td>—</td></tr>"
 
     recent = q("select chat_id, coalesce(nullif(cat,''),'—'), coalesce(nullif(concern,''),'—'), coalesce(nullif(src,''),'—'), coalesce(datetime(created,'unixepoch','localtime'),''), (select count(*) from gifts g where g.chat_id=users.chat_id), (select count(*) from orders o where o.chat_id=users.chat_id) from users order by created desc limit 200")
-    rec_rows = "".join(f"<tr><td>{r[0]}</td><td>{CAT.get(r[1], r[1])}</td><td>{CONC.get(r[2], r[2])}</td><td>{SRC.get(r[3], r[3])}</td><td class=n>{(r[4] or '')[5:16]}</td><td class=n>{r[5]}</td><td class=n>{r[6]}</td></tr>" for r in recent)
+    rec_rows = "".join(f"<tr><td><a href='/client?key={AK}&id={r[0]}'>{r[0]}</a></td><td>{CAT.get(r[1], r[1])}</td><td>{CONC.get(r[2], r[2])}</td><td>{SRC.get(r[3], r[3])}</td><td class=n>{(r[4] or '')[5:16]}</td><td class=n>{r[5]}</td><td class=n>{r[6]}</td></tr>" for r in recent)
 
     def panel(title, inner, wide=False):
         return f'<section class="p{" wide" if wide else ""}"><h2>{title}</h2>{inner}</section>'
@@ -380,6 +389,56 @@ def admin_page():
 {nav}
 <div class=tiles>{tiles}</div>
 <div class=grid>{grid}</div></html>"""
+
+def client_page(cid):
+    AK = os.environ.get("ADMIN_KEY", "")
+    try: ci = int(cid)
+    except Exception: ci = 0
+    CAT = {"face": "Обличчя", "body": "Тіло", "hair": "Волосся", "intimate": "Інтимний", "complex": "Комплексний", "": "—"}
+    SRC = {"promo": "попап сайту", "qr": "QR з пакування", "direct": "самі знайшли", "": "—"}
+    CONC = {"early": "Перші зморшки", "dry": "Сухість", "pigment": "Пігментація", "sens": "Чутливість", "mature": "Глибокі зморшки", "good": "Підтримка", "firm": "Пружність", "cellu": "Целюліт", "stretch": "Розтяжки", "oily": "Жирність", "dandruff": "Лупа", "loss": "Випадіння"}
+    GIFTU = {"dila": "Dila −20%", "ship": "Безкошт. доставка", "repeat": "−10% повторне"}
+    KEYU = {"quiz_done": "Пройшов квіз", "d2": "Драйп D+2", "d5": "Драйп D+5", "replenish": "Поповнення D+50", "cross": "Крос-сел D+14"}
+    PR = {"speed": "Швидкий результат", "reviews": "Відгуки", "safety": "Безпечний склад", "brand": "Бренд", "value": "Ціна/якість", "": "—"}
+    money = lambda x: f"{(x or 0):,.0f}".replace(",", " ")
+    esc = lambda t: (t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    head = f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>AntiAge · клієнт {ci}</title>{CAB_CSS}"""
+    back = f"<div class=nav><a href='/admin?key={AK}'>← кабінет</a></div>"
+    row = DB.execute("select src,cat,concern,priority,created from users where chat_id=?", (ci,)).fetchone()
+    if not row:
+        return head + f"<div class=top><h1>🌿 Клієнт {ci}</h1></div>{back}<p style='padding:14px;color:#93A28C'>Такого клієнта нема в базі.</p></html>"
+    src, cat, concern, priority, created = row
+    created_s = (DB.execute("select coalesce(datetime(?,'unixepoch','localtime'),'')", (created,)).fetchone()[0] or "")[:16]
+    phone = (DB.execute("select phone from orders where chat_id=? and coalesce(phone,'')!='' order by ts desc limit 1", (ci,)).fetchone() or [""])[0]
+    tot = (DB.execute("select coalesce(sum(amount),0) from orders where chat_id=? and status=5", (ci,)).fetchone() or [0])[0] or 0
+    cur = next(((t, p, nm) for t, p, nm in LVL if tot >= t), None)
+    lvl = f"{cur[1]}% «{cur[2]}»" if cur else "рівня ще нема"
+    prof = (f"<tr><td>Категорія</td><td>{CAT.get(cat, cat or '—')}</td></tr>"
+            f"<tr><td>Турбує</td><td>{CONC.get(concern, concern or '—')}</td></tr>"
+            f"<tr><td>Пріоритет</td><td>{PR.get(priority, priority or '—')}</td></tr>"
+            f"<tr><td>Джерело</td><td>{SRC.get(src, src or '—')}</td></tr>"
+            f"<tr><td>Телефон</td><td>{phone or '—'}</td></tr>"
+            f"<tr><td>Зайшов</td><td>{created_s or '—'}</td></tr>"
+            f"<tr><td>Викуплено всього</td><td>{money(tot)} грн</td></tr>"
+            f"<tr><td>Рівень лояльності</td><td>{lvl}</td></tr>")
+    st = lambda s: {5: "викуплено", 6: "скасовано", 13: "скасовано"}.get(s, "в роботі")
+    orders = DB.execute("select order_id, amount, status, coalesce(datetime(ts,'unixepoch','localtime'),'') from orders where chat_id=? order by ts desc", (ci,)).fetchall()
+    ord_rows = "".join(f"<tr><td>{o[0]}</td><td class=n>{money(o[1])} грн</td><td>{st(o[2])}</td><td class=n>{o[3][:16]}</td></tr>" for o in orders) or "<tr><td>—</td></tr>"
+    gifts = DB.execute("select gift, coalesce(datetime(ts,'unixepoch','localtime'),'') from gifts where chat_id=?", (ci,)).fetchall()
+    gift_rows = "".join(f"<tr><td>{GIFTU.get(g[0], g[0])}</td><td class=n>{g[1][:16]}</td></tr>" for g in gifts) or "<tr><td>—</td></tr>"
+    sent = DB.execute("select key, coalesce(datetime(ts,'unixepoch','localtime'),'') from sent where chat_id=? order by ts", (ci,)).fetchall()
+    sent_rows = "".join(f"<tr><td>{KEYU.get(s[0], s[0])}</td><td class=n>{s[1][:16]}</td></tr>" for s in sent if not s[0].startswith('post:')) or "<tr><td>—</td></tr>"
+    msgs = DB.execute("select dir, text, coalesce(datetime(ts,'unixepoch','localtime'),'') from msgs where chat_id=? order by ts desc limit 300", (ci,)).fetchall()
+    msg_rows = "".join(f"<tr><td class=n style='white-space:nowrap;color:#93A28C'>{m[2][5:16]}</td><td style='white-space:nowrap'>{'→ бот' if m[0]=='out' else '← клієнт'}</td><td>{esc(m[1])[:500]}</td></tr>" for m in msgs) or "<tr><td colspan=3 style='color:#93A28C'>Поки порожньо — логування щойно увімкнено, накопичуватиметься з нових повідомлень.</td></tr>"
+    def panel(title, inner, wide=False):
+        return f'<section class="p{" wide" if wide else ""}"><h2>{title}</h2>{inner}</section>'
+    grid = (panel("Профіль", f"<table>{prof}</table>")
+            + panel("Замовлення", f"<table>{ord_rows}</table>")
+            + panel("Подарунки", f"<table>{gift_rows}</table>")
+            + panel("Отримані автосерії", f"<table>{sent_rows}</table>")
+            + panel("Історія переписки <small>останні 300</small>", f"<table>{msg_rows}</table>", wide=True))
+    top = f"<div class=top><h1>🌿 Клієнт {ci}</h1><span class=upd>{phone or ''}</span></div>"
+    return head + top + back + f"<div class=grid>{grid}</div></html>"
 
 HTTPServer.allow_reuse_address = True
 class Hook(BaseHTTPRequestHandler):
@@ -431,6 +490,9 @@ class Hook(BaseHTTPRequestHandler):
         if u.path == "/admin" and parse_qs(u.query).get("key", [""])[0] == os.environ.get("ADMIN_KEY", ""):
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
             self.wfile.write(admin_page().encode()); return
+        if u.path == "/client" and parse_qs(u.query).get("key", [""])[0] == os.environ.get("ADMIN_KEY", ""):
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
+            self.wfile.write(client_page(parse_qs(u.query).get("id", [""])[0]).encode()); return
         self.send_response(200); self.end_headers(); self.wfile.write(b"ok")
     def log_message(self, *a): pass
 
