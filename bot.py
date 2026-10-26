@@ -928,6 +928,11 @@ def on_callback(cb):
         row = DB.execute("select coalesce(store,'') from customers where chat_id=?", (chat_id,)).fetchone()
         store = row[0] if row else ""
         return send(chat_id, T.get(f"faq_{store}", T["faq"]))
+    if data == "reviewdone":  # клієнт лишив Google-відгук → веде надіслати скрін Оксані (виплата 150 грн вручну)
+        return tg("sendMessage", chat_id=chat_id, parse_mode="HTML", text=T["review_done"],
+                  reply_markup={"inline_keyboard": [
+                      [{"text": "💬 Написати Оксані (Telegram)", "url": "https://t.me/+380636324010"}],
+                      [{"text": "💚 WhatsApp", "url": "https://wa.me/380636324010"}]]})
     if data.startswith("gift:"):
         give(chat_id, data[5:])
         stage = DB.execute("select stage from customers where chat_id=?", (chat_id,)).fetchone()[0]
@@ -1313,7 +1318,7 @@ def cron():
                     sn = 0
                     for (cid,) in cands:
                         try:
-                            send(cid, personalize(T["reviewask"], cid), [[("Залишити відгук на Google", REVIEW_LINK)]])
+                            send(cid, personalize(T["reviewask"], cid), [[("Залишити відгук на Google", REVIEW_LINK)], [("📸 Я залишив відгук", "reviewdone")]])
                             DB.execute("insert into sent values(?,?,?)", (cid, "reviewask", now)); sn += 1
                         except Exception as e: print("reviewask", e)
                     DB.commit()  # авто-флоу — без сповіщень адмінам (видно в дашборді /posts)
