@@ -322,6 +322,8 @@ def replenish_text(phone):
     return base + "\n\nОберіть улюблене — і почніть накопичувати на постійну знижку до 10% 👇"
 CROSS_TEXT = ("Як ваша шкіра? 🌿 Якщо результат тішить — саме час підсилити догляд: сироватка + крем працюють у парі краще, ніж окремо.\n\n"
     "Загляньте в каталог — підберемо наступний крок 💛")
+NUDGES = [(3, "nudge1", "Дякуємо за замовлення в AntiAge Cosmetics 💛\nЯкщо лишились питання — щодо передплати, оплати чи доставки — просто напишіть нам (кнопка «💬 Підтримка» внизу), і ми допоможемо все завершити 🤍"),
+          (24, "nudge2", "Ваше замовлення в AntiAge ще чекає завершення ✨\nМожливо, виникло питання з передплатою (200 грн) чи вибором доставки? Напишіть — підкажемо за хвилину, щоб обрані засоби не розібрали 💛")]
 
 def cron():
     while True:
@@ -333,6 +335,18 @@ def cron():
                         send(chat_id, text, [[("🛍 На сайт", SITE)]])
                         DB.execute("insert into sent values(?,?,?)", (chat_id, key, now))
                     except Exception as e: print("drip", e)
+        # unpaid-nudge: дотиск неоплачених/непідтверджених (статус NEW); # ponytail: live-перевірка статусу на кожен NEW-ордер щогодини, при обсязі — рідше
+        for order_id, chat_id, ts0, st in DB.execute("select order_id, chat_id, ts, status from orders where status in (0,1)"):
+            for hrs, key, text in NUDGES:
+                k = f"{key}:{order_id}"
+                if now - ts0 >= hrs * 3600 and not DB.execute("select 1 from sent where chat_id=? and key=?", (chat_id, k)).fetchone():
+                    o = sd_order(order_id); live = int((o or {}).get("statusId") or st or 0)
+                    if live != st:
+                        DB.execute("update orders set status=? where order_id=?", (live, order_id)); st = live
+                    if live in (0, 1):
+                        try: send(chat_id, text, [[("🛍 Завершити на сайті", SITE)]])
+                        except Exception as e: print("nudge", e)
+                    DB.execute("insert or ignore into sent values(?,?,?)", (chat_id, k, now))
         # поповнення + крос-сел за датою SOLD
         for chat_id, rep in DB.execute("select chat_id, replenish from orders where replenish>0 and replenish<=?", (now,)):
             using_shelf = DB.execute("select 1 from shelf where chat_id=? and opened>0 limit 1", (chat_id,)).fetchone()
