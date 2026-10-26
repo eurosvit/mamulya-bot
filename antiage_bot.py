@@ -44,8 +44,11 @@ def norm_phone(p):
 def sd_order(order_id):
     if not SD_KEY: return None
     try:
-        req = urllib.request.Request(f"https://aleyana.salesdrive.me/api/order/list/?filter[id]={order_id}", headers={"Form-Api-Key": SD_KEY})
-        return json.load(urllib.request.urlopen(req, timeout=20))["data"][0]
+        req = urllib.request.Request(f"https://aleyana.salesdrive.me/api/order/list/?filter[id][from]={order_id}&filter[id][to]={order_id}", headers={"Form-Api-Key": SD_KEY})
+        data = json.load(urllib.request.urlopen(req, timeout=20)).get("data", [])
+        for o in data:
+            if str(o.get("id")) == str(order_id): return o
+        return data[0] if data else None
     except Exception as e: print("sd_order", e); return None
 
 def sd_total(phone):
