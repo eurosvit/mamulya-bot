@@ -1302,13 +1302,13 @@ def cron():
                 else:
                     DB.commit()
             except Exception as e: print("spiroffer-block", e)
-        # 📝 Прохання про Google-відгук: ЩОВІВТОРКА до 5 осіб, раз на клієнта.
+        # 📝 Прохання про Google-відгук: ЩОСЕРЕДИ до 5 осіб, раз на клієнта (середа — щоб не збігатись із блог-розсилками по вівторках).
         # Спочатку повторні (≥2 SOLD, SOLD>7д); коли закінчаться — будь-які покупці SOLD>7д («потім просто»).
         # Вмикається REVIEW_LIVE=1 у Render (вимкнути — прибрати/змінити цю змінну).
-        if os.environ.get("REVIEW_LIVE") == "1" and time.localtime().tm_wday == 1:  # tm_wday: вівторок = 1
+        if os.environ.get("REVIEW_LIVE") == "1" and time.localtime().tm_wday == 2:  # tm_wday: середа = 2
             try:
                 recent = DB.execute("select count(*) from sent where key='reviewask' and ts>?", (now - 2 * DAY,)).fetchone()[0]
-                if recent == 0:  # цього вівторка ще не слали — одна вибірка на тиждень
+                if recent == 0:  # цієї середи ще не слали — одна вибірка на тиждень
                     cut = now - 7 * DAY
                     cands = DB.execute(
                         "select c.chat_id from customers c where coalesce(c.phone,'')!='' "
@@ -1330,7 +1330,7 @@ def cron():
                         DB.execute("insert or ignore into sent values(?,?,?)", (cid, "reviewask", now))  # мітимо навіть при помилці — без ретраю
                     if sent_cids:
                         pid = DB.execute("insert into posts(ts,target,text) values(?,?,?)",
-                                         (now, "reviewask", "📝 Прохання про Google-відгук (авто, вівторок) · кешбек 150 грн")).lastrowid
+                                         (now, "reviewask", "📝 Прохання про Google-відгук (авто, середа) · кешбек 150 грн")).lastrowid
                         for cid in sent_cids:
                             DB.execute("insert or ignore into sent values(?,?,?)", (cid, f"post:{pid}", now))
                     DB.commit()
@@ -2313,10 +2313,10 @@ def posts_page():
     _rcut = time.time() - 7 * 86400
     rev_rep = DB.execute("select count(*) from (select c.chat_id from customers c join orders o on o.phone=c.phone and o.phone!='' and o.status=5 where coalesce(c.phone,'')!='' and not exists(select 1 from sent s where s.chat_id=c.chat_id and s.key='reviewask') group by c.chat_id having count(*)>=2 and min(o.ts)<?)", (_rcut,)).fetchone()[0]
     rev_all = DB.execute("select count(distinct c.chat_id) from customers c join orders o on o.phone=c.phone and o.phone!='' where o.status=5 and o.ts<? and not exists(select 1 from sent s where s.chat_id=c.chat_id and s.key='reviewask')", (_rcut,)).fetchone()[0]
-    _dtt = (1 - time.localtime().tm_wday) % 7
-    _next_tue = time.strftime("%d.%m", time.localtime(time.time() + _dtt * 86400))
-    review_html = ("<section class=p><h2>📝 Прохання про Google-відгук <small>авто · щовівторка ≤5 · кешбек 150 грн</small></h2>"
-        f"<p class=sub>Статус: <b>{'🟢 увімкнено' if rev_live else '🔴 вимкнено'}</b> · наступна вибірка: <b>{_next_tue}</b> · надіслано всього: <b>{rev_sent}</b></p>"
+    _dtt = (2 - time.localtime().tm_wday) % 7
+    _next_wed = time.strftime("%d.%m", time.localtime(time.time() + _dtt * 86400))
+    review_html = ("<section class=p><h2>📝 Прохання про Google-відгук <small>авто · щосереди ≤5 · кешбек 150 грн</small></h2>"
+        f"<p class=sub>Статус: <b>{'🟢 увімкнено' if rev_live else '🔴 вимкнено'}</b> · наступна вибірка: <b>{_next_wed}</b> · надіслано всього: <b>{rev_sent}</b></p>"
         "<table><tr><th>Черга</th><th class=n>Лишилось</th></tr>"
         f"<tr><td>Повторні (йдуть першими)</td><td class=n>{rev_rep}</td></tr>"
         f"<tr><td>Усі покупці SOLD&gt;7д (потім)</td><td class=n>{rev_all}</td></tr></table></section>")
