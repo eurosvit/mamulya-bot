@@ -181,7 +181,7 @@ def on_start(chat_id, arg):
     start_quiz(chat_id)
 
 def seed_shelf(chat_id, order_id, order):
-    added = []
+    added = []; now = time.time(); i = 0
     for p in ((order or {}).get("products") or []):
         name = (p.get("text") or "").strip()
         if not name or not (p.get("sku") or "").strip() or name.upper() == "КУПОН":
@@ -189,31 +189,27 @@ def seed_shelf(chat_id, order_id, order):
         if DB.execute("select 1 from shelf where chat_id=? and order_id=? and product=?", (chat_id, order_id, name)).fetchone():
             continue
         cat, dd = shelf_days(name)
-        DB.execute("insert into shelf(chat_id,order_id,product,category,days,opened,remind,reminded,ts) values(?,?,?,?,?,0,0,0,?)",
-                   (chat_id, order_id, name, cat, dd, time.time()))
-        added.append(name)
+        remind = now + max(dd - SHELF_LEAD, 7) * DAY + i * 2 * DAY  # авто-старт від доставки; +2дн/товар щоб нагадування не падали разом
+        DB.execute("insert into shelf(chat_id,order_id,product,category,days,opened,remind,reminded,ts) values(?,?,?,?,?,?,?,0,?)",
+                   (chat_id, order_id, name, cat, dd, now, remind, now))
+        added.append(name); i += 1
     DB.commit()
     return added
 
 def shelf_prompt(chat_id, added):
     if added:
-        send(chat_id, "🧴 Додав до вашої полиці догляду: <b>" + ", ".join(short_prod(a) for a in added) + "</b>.\n"
-             "Коли почнете користуватись — відкрийте «🧴 Моя полиця» і тицьніть «✅ Відкрила» біля засобу. Я нагадаю, коли час докупити 💧")
+        send(chat_id, "🧴 Додав на вашу полицю догляду: <b>" + ", ".join(short_prod(a) for a in added) + "</b>.\n"
+             "Я сам нагадаю, коли кожен засіб добігатиме кінця — щоб ви встигли докупити без паузи в догляді 💛")
 
 def shelf_view(chat_id):
     rows = DB.execute("select id, product, opened, days from shelf where chat_id=? order by ts desc limit 15", (chat_id,)).fetchall()
     if not rows:
         return send(chat_id, "🧴 Ваша полиця догляду поки порожня.\nЗасоби зʼявляться тут після замовлення — і я нагадаю, коли час докупити 💛")
-    now = time.time(); lines = ["🧴 <b>Ваша полиця догляду</b>\n"]; btns = []
+    now = time.time(); lines = ["🧴 <b>Ваша полиця догляду</b>\nНагадаю про кожен засіб, коли добігатиме кінця 💛\n"]; btns = []
     for rid, prod, opened, days in rows:
-        sp = short_prod(prod)
-        if not opened:
-            lines.append(f"• {sp}\n   <i>ще не відкрито</i>")
-            btns.append([(f"✅ Відкрила: {prod[:16]}", f"sh:o:{rid}")])
-        else:
-            left = int((opened + (days or REPLENISH_DAYS) * DAY - now) / DAY)
-            lines.append(f"• {sp}\n   лишилось ~{max(left, 0)} дн.")
-            btns.append([(f"✔ Закінчився: {prod[:14]}", f"sh:d:{rid}")])
+        left = int(((opened or now) + (days or REPLENISH_DAYS) * DAY - now) / DAY)
+        lines.append(f"• {short_prod(prod)}\n   нагадаю ~через {max(left - SHELF_LEAD, 0)} дн.")
+        btns.append([(f"✔ Закінчився: {prod[:14]}", f"sh:d:{rid}")])
     return send(chat_id, "\n".join(lines), btns)
 
 def after_purchase(chat_id, order_id):
@@ -245,15 +241,9 @@ def on_callback(cb):
     tg("answerCallbackQuery", callback_query_id=cb["id"])
     if data.startswith("gift:"):
         return give_gift(chat_id, data[5:])
-    if data.startswith("sh:o:"):
-        rid = data[5:]
-        r = DB.execute("select days from shelf where id=? and chat_id=?", (rid, chat_id)).fetchone()
-        if r:
-            dd = r[0] or REPLENISH_DAYS; now = time.time()
-            DB.execute("update shelf set opened=?, remind=?, reminded=0 where id=? and chat_id=?",
-                       (now, now + max(dd - SHELF_LEAD, 7) * DAY, rid, chat_id)); DB.commit()
-            send(chat_id, f"Прийнято 💛 Нагадаю приблизно за {SHELF_LEAD} днів до того, як засіб закінчиться — щоб ви докупили без паузи в догляді.")
-        return
+    if data.startswith("sh:l:"):
+        DB.execute("update shelf set remind=?, reminded=0 where id=? and chat_id=?", (time.time() + 18 * DAY, data[5:], chat_id)); DB.commit()
+        return send(chat_id, "Добре 💛 Нагадаю ще раз приблизно за 2,5 тижні.")
     if data.startswith("sh:d:"):
         DB.execute("delete from shelf where id=? and chat_id=?", (data[5:], chat_id)); DB.commit()
         return send(chat_id, "Прибрав із полиці ✅ Докупите — додам знову автоматично.")
@@ -363,7 +353,7 @@ def cron():
         for chat_id, rid, prod, ph_ in DB.execute("select s.chat_id, s.id, s.product, (select phone from orders o where o.chat_id=s.chat_id order by o.ts desc limit 1) from shelf s where s.opened>0 and s.remind>0 and s.remind<=? and s.reminded=0", (now,)):
             try:
                 ll = level_line(ph_ or "")
-                send(chat_id, f"🧴 Ваш засіб <b>{short_prod(prod)}</b> скоро закінчиться 💧 Час поповнити, щоб не переривати догляд." + ("\n\n" + ll if ll else ""), [[("🛍 Докупити", SITE)]])
+                send(chat_id, f"🧴 Ваш засіб <b>{short_prod(prod)}</b>, мабуть, добігає кінця 💧 Докупити, щоб не переривати догляд?" + ("\n\n" + ll if ll else ""), [[("🛍 Докупити", SITE)], [("⏳ Ще є — нагадай згодом", f"sh:l:{rid}")]])
                 DB.execute("update shelf set reminded=1 where id=?", (rid,))
             except Exception as e: print("shelf-remind", e)
         DB.commit()
