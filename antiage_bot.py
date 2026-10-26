@@ -87,6 +87,21 @@ def level_line(phone):
     cur = next(((t, p, n) for t, p, n in LVL if total >= t), None)
     if not cur: return None
     return f"💎 Ваші покупки: <b>{total:,.0f} грн</b> — постійна знижка <b>{cur[1]}%</b> (рівень «{cur[2]}») діє на всі замовлення!".replace(",", " ")
+
+TIER_UP = {
+    "Базовий": "🎉 Вітаємо — ви відкрили рівень «Базовий»! Тепер діє постійна знижка <b>3%</b> на всі замовлення в AntiAge 💛",
+    "Смарт": "🎉 Новий рівень — «Смарт»! Ваша постійна знижка тепер <b>5%</b> + ранній доступ до новинок ✨",
+    "VIP": "⭐ Вітаємо, ви тепер <b>VIP</b>! Постійна знижка <b>7%</b>, безкоштовна доставка й пріоритетна підтримка — завжди 💛",
+    "Діамант": "💎 Найвищий рівень — «Діамант»! <b>10%</b> на все, подарунок у кожне замовлення й особистий підбір. Дякуємо, що ви з нами ✨",
+}
+def tier_up(chat_id, phone):
+    cur = next(((t, p, nm) for t, p, nm in LVL if sd_total(phone) >= t), None)
+    if not cur: return False
+    nm = cur[2]
+    if DB.execute("select 1 from sent where chat_id=? and key=?", (chat_id, f"tier:{nm}")).fetchone(): return False
+    send(chat_id, TIER_UP.get(nm, f"🎉 Новий рівень лояльності: «{nm}» 💛"))
+    DB.execute("insert or ignore into sent values(?,?,?)", (chat_id, f"tier:{nm}", time.time())); DB.commit()
+    return True
 PROMO = ("\n\nВаш промокод: <code>ANTIAGE10</code>\n"
          "🎯 10% знижки на перше замовлення\n⏰ Діє 7 днів\n"
          "📝 Поле «Маєте купон на знижку?» при оформленні\n"
@@ -220,9 +235,11 @@ def after_purchase(chat_id, order_id):
     DB.execute("insert or replace into orders values(?,?,?,?,?,?,?)", (order_id, chat_id, phone, amount, time.time(), status,
                time.time() + REPLENISH_DAYS * DAY if status == 5 else 0)); DB.commit()
     send(chat_id, "Дякуємо за замовлення в AntiAge Cosmetics 💛 Ми вже готуємо вашу посилку.")
-    ll = level_line(phone)
-    if ll: send(chat_id, ll)
+    if not tier_up(chat_id, phone):
+        ll = level_line(phone)
+        if ll: send(chat_id, ll)
     if status == 5:
+        DB.execute("insert or ignore into sent values(?,?,?)", (chat_id, f"sold:{order_id}", time.time())); DB.commit()
         gift_menu(chat_id)
         shelf_prompt(chat_id, seed_shelf(chat_id, order_id, o))
     else:
@@ -325,6 +342,20 @@ CROSS_TEXT = ("Як ваша шкіра? 🌿 Якщо результат тіш
 NUDGES = [(3, "nudge1", "Дякуємо за замовлення в AntiAge Cosmetics 💛\nЯкщо лишились питання — щодо передплати, оплати чи доставки — просто напишіть нам (кнопка «💬 Підтримка» внизу), і ми допоможемо все завершити 🤍"),
           (24, "nudge2", "Ваше замовлення в AntiAge ще чекає завершення ✨\nМожливо, виникло питання з передплатою (200 грн) чи вибором доставки? Напишіть — підкажемо за хвилину, щоб обрані засоби не розібрали 💛")]
 
+CARE_TIPS = {
+    "крем": "Крем наносьте на вологу шкіру вранці та ввечері — так він краще утримує вологу. Зволоження відчувається одразу, доглядовий ефект — через 2–3 тижні регулярності.",
+    "сироватк": "Сироватку — на очищену шкіру ПІД крем, 2–3 краплі. Активи працюють накопичувально: помітний результат зазвичай через 3–4 тижні.",
+    "тонік": "Тонік — одразу після вмивання, щоб відновити pH і підготувати шкіру до крему/сироватки. Не витирайте — дайте всотатись.",
+    "тонер": "Тонер — після очищення, перед сироваткою. Готує шкіру краще приймати наступні засоби.",
+    "маск": "Маску — 1–2 рази на тиждень на очищену шкіру, 15–20 хв. Частіше не варто, щоб не перевантажити шкіру.",
+    "вмива": "Вмивайтеся теплою (не гарячою) водою вранці та ввечері. Гарячу воду й агресивне тертя уникайте — вони руйнують захисний бар'єр.",
+    "пінк": "Пінку/гель для вмивання — на вологу шкіру м'якими рухами, тоді змийте теплою водою.",
+    "spf": "SPF — фінальний крок ранку, за 15 хв до виходу. Оновлюйте кожні 2–3 год на активному сонці. Це головний анти-ейдж крок.",
+    "сонцезахис": "Сонцезахист наносьте щедро й щодня — навіть узимку й у хмарну погоду UVA проходить крізь хмари.",
+    "олі": "Олію для тіла — на вологу шкіру після душу, щоб 'запечатати' вологу.",
+    "шампун": "Шампунь — на шкіру голови, а не на довжину; бальзам/маску навпаки — на довжину, уникаючи коренів.",
+    "інтим": "Засіб для інтимної гігієни — зовнішньо, 1 раз на день. М'який pH-збалансований догляд, без мила.",
+}
 def cron():
     while True:
         now = time.time()
@@ -335,6 +366,17 @@ def cron():
                         send(chat_id, text, [[("🛍 На сайт", SITE)]])
                         DB.execute("insert into sent values(?,?,?)", (chat_id, key, now))
                     except Exception as e: print("drip", e)
+        # пост-покупка онбординг D+2 — поради по категоріях купленого (з полиці)
+        for chat_id, k, ts0 in DB.execute("select chat_id, key, ts from sent where key like 'sold:%'"):
+            oid = k[5:]
+            if now - ts0 >= 2 * DAY and not DB.execute("select 1 from sent where chat_id=? and key=?", (chat_id, f"onb:{oid}")).fetchone():
+                cats = [r[0] for r in DB.execute("select distinct category from shelf where chat_id=? and order_id=? and coalesce(category,'')!=''", (chat_id, oid))]
+                tips = [CARE_TIPS[c] for c in cats if c in CARE_TIPS][:3]
+                if tips:
+                    try:
+                        send(chat_id, "💧 <b>Кілька порад, щоб ваші засоби дали максимум:</b>\n\n" + "\n\n".join("🔸 " + t for t in tips) + "\n\nПитання по застосуванню? Тисніть «💬 Підтримка» внизу 💛")
+                    except Exception as e: print("onb", e)
+                DB.execute("insert or ignore into sent values(?,?,?)", (chat_id, f"onb:{oid}", now))
         # unpaid-nudge: дотиск неоплачених/непідтверджених (статус NEW); # ponytail: live-перевірка статусу на кожен NEW-ордер щогодини, при обсязі — рідше
         for order_id, chat_id, ts0, st in (DB.execute("select order_id, chat_id, ts, status from orders where status in (0,1)") if os.environ.get("ANTIAGE_NUDGE") else []):
             for hrs, key, text in NUDGES:
@@ -539,8 +581,10 @@ class Hook(BaseHTTPRequestHandler):
                 if status == 5 and not row[1]:
                     DB.execute("update orders set status=5, replenish=? where order_id=?", (time.time() + REPLENISH_DAYS * DAY, oid))
                     send(cid, "Замовлення отримано 🎉 Дякуємо! Гарного догляду 💛")
-                    ll = level_line(phone)
-                    if ll: send(cid, ll)
+                    DB.execute("insert or ignore into sent values(?,?,?)", (cid, f"sold:{oid}", time.time()))
+                    if not tier_up(cid, phone):
+                        ll = level_line(phone)
+                        if ll: send(cid, ll)
                     gift_menu(cid)
                     shelf_prompt(cid, seed_shelf(cid, oid, sd_order(oid)))
                 elif status in (6, 13):
