@@ -1,3 +1,4 @@
 # stdlib only, крім GA4 (підпис RS256 — не stdlib)
 google-auth>=2.0
 requests>=2.28
+certifi>=2025.1.1  # security: eMudhra cert distrust (10.2026) — resolves to latest
