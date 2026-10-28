@@ -2051,7 +2051,7 @@ class Hook(BaseHTTPRequestHandler):
             self.wfile.write(near_page().encode()); return
         if u.path == "/posts" and authed:
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
-            self.wfile.write(posts_page().encode()); return
+            self.wfile.write(posts_page(qs.get("from", [""])[0], qs.get("to", [""])[0]).encode()); return
         if u.path == "/kpi" and authed:
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
             self.wfile.write(kpi_page(qs.get("store", [None])[0]).encode()); return
@@ -2227,7 +2227,7 @@ def attrib_orders():
             res[pid].append((amt or 0, items, ots, phone, nm, store))
     return res
 
-def posts_page():
+def posts_page(d_from="", d_to=""):
     AK = os.environ.get("ADMIN_KEY", "")
     q = lambda sql, *a: DB.execute(sql, a).fetchall()
     n = lambda sql, *a: DB.execute(sql, a).fetchone()[0]
@@ -2235,30 +2235,45 @@ def posts_page():
     SEG_UA = {"nobuy": "🆕 без покупок", "buyers": "💜 покупці", "vip": "⭐ VIP", "sleeping": "😴 сплячі", "near": "✨ за крок до рівня", "doman": "🧒 Домана/Ліполенд",
               "pregnant": "вагітність", "m0_3": "0–3 міс", "m3_6": "3–6 міс", "m6_12": "6–12 міс", "lipoland": "Lipoland", "postpartum": "🤱 постпартум",
               "Mamulya.lviv": "Mamulya", "Modnamama": "Modnamama", "Znana Mama": "Znana", "всі": "усім"}
-    posts = q("select id, ts, target, text from posts order by ts desc limit 50")
+    # фільтр періоду (?from=YYYY-MM-DD&to=…); без нього — усі розсилки
+    def _dts(s, end=False):
+        try: return time.mktime(time.strptime(s, "%Y-%m-%d")) + (86399 if end else 0)
+        except Exception: return None
+    ts_from, ts_to = _dts(d_from), _dts(d_to, True)
+    wsql = ""; wp = []
+    if ts_from is not None: wsql += " and ts>=?"; wp.append(ts_from)
+    if ts_to is not None: wsql += " and ts<=?"; wp.append(ts_to)
+    allposts = q(f"select id, ts, target, text from posts where 1=1{wsql} order by ts desc", *wp)
     mail_rows = ""
     for kind, cnt, op, cl, ent, nu in q("select kind, count(*), sum(case when opened>0 then 1 else 0 end), sum(case when clicked>0 then 1 else 0 end), sum(case when entered>0 then 1 else 0 end), sum(newuser) from maillog group by kind order by kind"):
         op, cl, ent, nu = op or 0, cl or 0, ent or 0, nu or 0
         label = {"memo": "📦 Памятка «в дорозі»", "delivered": "🎉 «Забрали» + лояльність"}.get(kind, kind)
         mail_rows += f"<tr><td>{label}</td><td class=n>{cnt}</td><td class=n>{op} ({op/cnt*100:.0f}%)</td><td class=n>{cl} ({cl/cnt*100:.0f}%)</td><td class=n>{ent} ({ent/cnt*100:.0f}%)</td><td class=n><b>{nu}</b></td></tr>"
     AT = attrib_orders()  # last-click атрибуція
-    rows = ""
-    tot_deliv = tot_ord = tot_rev = 0
-    for pid, ts, target, text in posts:
+    pm = {}  # pid -> (deliv, clk, orders, rev) — метрики кожної розсилки за період
+    tot_deliv = tot_clk = tot_ord = 0; tot_rev = 0.0
+    mom = {}  # 'YYYY-MM' -> [розсилок, доставлено, кліки, замовлень, оборот]
+    for pid, ts, target, text in allposts:
         deliv = n("select count(*) from sent where key=?", f"post:{pid}")
-        lst = AT.get(pid, [])
-        orders = len(lst); rev = sum(a[0] for a in lst)
         clk = n("select count(distinct chat_id) from clicks where pid=?", pid)
+        lst = AT.get(pid, []); orders = len(lst); rev = sum(a[0] for a in lst)
+        pm[pid] = (deliv, clk, orders, rev)
+        tot_deliv += deliv; tot_clk += clk; tot_ord += orders; tot_rev += rev
+        b = mom.setdefault(time.strftime("%Y-%m", time.localtime(ts)), [0, 0, 0, 0, 0.0])
+        b[0] += 1; b[1] += deliv; b[2] += clk; b[3] += orders; b[4] += rev
+    posts = allposts[:50]
+    rows = ""
+    for pid, ts, target, text in posts:
+        deliv, clk, orders, rev = pm[pid]
         ctr = f"{clk/deliv*100:.0f}%" if deliv else "—"
-        tot_deliv += deliv; tot_ord += orders; tot_rev += rev
         when = time.strftime("%d.%m %H:%M", time.localtime(ts))
         conv = f"{orders/deliv*100:.0f}%" if deliv else "—"
         ord_cell = f"<a href='/border?key={AK}&id={pid}'>{orders}</a>" if orders else "0"
         rows += f"<tr><td>{when}</td><td>{SEG_UA.get(target, target)}</td><td class=n>{deliv}</td><td class=n>{clk}</td><td class=n>{ctr}</td><td class=n>{ord_cell}</td><td class=n>{conv}</td><td class=n>{rev:,.0f}".replace(",", " ") + f"</td><td style=max-width:240px;white-space:normal;color:#6E5F65>{text[:80]}</td></tr>"
-    # розріз по магазинах: замовлення отримувачів усіх розсилок, 7 днів, по магазину
+    # розріз по магазинах: замовлення отримувачів розсилок ЗА ПЕРІОД, 7 днів, по магазину
     bs = {}
-    for lst in AT.values():
-        for amt, items, ots, phone, nm, store in lst:
+    for pid in pm:
+        for amt, items, ots, phone, nm, store in AT.get(pid, []):
             if store: bs.setdefault(store, [0, 0]); bs[store][0] += 1; bs[store][1] += amt
     store_rows = "".join(f"<tr><td>{st}</td><td class=n>{c}</td><td class=n>{r:,.0f}".replace(",", " ") + "</td></tr>" for st, (c, r) in sorted(bs.items(), key=lambda x: -x[1][1])) or "<tr><td>поки нема</td></tr>"
     sched = q("select id, run_ts, seg, body, btn, done, sent, total, coalesce(img,'') from scheduled order by done, run_ts")
@@ -2329,15 +2344,40 @@ def posts_page():
         f"<tr><td>Спочатку повторні</td><td class=n>{rev_rep}</td><td class=n>{_rep_wk}</td></tr>"
         f"<tr><td>Усього в черзі (разом)</td><td class=n>{rev_all}</td><td class=n>{_all_wk}</td></tr></table>"
         "<p class=sub>Йдуть по 5 щосереди: спершу повторні, коли закінчаться — автоматично решта покупців.</p></section>")
-    cards = [("Розсилок", len(posts)), ("Доставлено", tot_deliv), ("Замовлень після (7д)", tot_ord), ("Оборот, грн", f"{tot_rev:,.0f}".replace(",", " ")), ("🚫 Заблокували", tot_block)]
+    # 📊 агрегати за період + динаміка по місяцях
+    pct = lambda a, b: f"{a/b*100:.0f}%" if b else "—"
+    grn = lambda v: f"{v:,.0f}".replace(",", " ")
+    agg_ctr = pct(tot_clk, tot_deliv); agg_conv = pct(tot_ord, tot_deliv)
+    avg_check = grn(tot_rev / tot_ord) if tot_ord else "—"
+    rev_per = grn(tot_rev / len(allposts)) if allposts else "—"
+    mom_rows = ""
+    for ym in sorted(mom, reverse=True):
+        p, dv, ck, od, rv = mom[ym]
+        mom_rows += (f"<tr><td>{ym}</td><td class=n>{p}</td><td class=n>{dv}</td><td class=n>{ck}</td><td class=n>{pct(ck, dv)}</td>"
+                     f"<td class=n>{od}</td><td class=n>{pct(od, dv)}</td><td class=n>{grn(rv)}</td><td class=n>{grn(rv / od) if od else '—'}</td></tr>")
+    filter_form = ("<form method=get class=p style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 14px;padding:10px 14px'>"
+        f"<input type=hidden name=key value='{AK}'>"
+        "<b style=font-size:14px>Період:</b>"
+        f"<input type=date name=from value='{d_from}' style='padding:4px 8px'> — <input type=date name=to value='{d_to}' style='padding:4px 8px'>"
+        "<button type=submit style='padding:5px 14px'>Показати</button>"
+        + (f"<a href='/posts?key={AK}' style='font-size:13px;color:var(--ink3)'>скинути</a>" if (d_from or d_to) else "")
+        + "<span style='font-size:12px;color:var(--ink3);margin-left:auto'>метрики нижче — за обраний період</span></form>")
+    mom_html = ('<section class="p wide"><h2>📊 Динаміка по місяцях <small>CTR = кліки/доставлено · конв. = замовлення/доставлено</small></h2>'
+        "<table><tr><th>Місяць</th><th class=n>Розсилок</th><th class=n>Доставлено</th><th class=n>Кліки</th><th class=n>CTR</th><th class=n>Замовлень</th><th class=n>Конв.</th><th class=n>Оборот</th><th class=n>Сер.чек</th></tr>"
+        f"{mom_rows or '<tr><td>нема даних за період</td></tr>'}</table></section>")
+    cards = [("Розсилок", len(allposts)), ("Доставлено", tot_deliv), ("Кліків", tot_clk), ("CTR", agg_ctr),
+             ("Замовлень", tot_ord), ("Конверсія", agg_conv), ("Оборот, грн", grn(tot_rev)),
+             ("Сер. чек", avg_check), ("Дохід/розсилку", rev_per), ("🚫 Заблокували", tot_block)]
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Розсилки — Mamulya Bot</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
 {CAB_CSS}
 <div class=top><h1>💗 Розсилки</h1><span class=upd>оновлено {time.strftime("%d.%m %H:%M")}</span></div>
 {_nav("Розсилки", AK)}
+{filter_form}
 <div class=tiles>{"".join(f'<div class=tile><b>{v}</b><span>{k}</span></div>' for k, v in cards)}</div>
 <div class=grid>
+{mom_html}
 <section class="p wide"><h2>Надіслані розсилки <small>останні 50 · замовлення/оборот — отримувачі протягом 7 днів після</small></h2>
 <table><tr><th>Коли</th><th>Сегмент</th><th class=n>Доставлено</th><th class=n>Кліки</th><th class=n>CTR</th><th class=n>Замовлень</th><th class=n>Конв.</th><th class=n>Оборот</th><th>Текст</th></tr>{rows or '<tr><td>ще не було розсилок — надішліть /post у боті</td></tr>'}</table></section>
 <section class="p"><h2>Результат по магазинах <small>замовлення отримувачів розсилок, 7 днів</small></h2>
