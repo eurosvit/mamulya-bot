@@ -2252,15 +2252,17 @@ def posts_page(d_from="", d_to=""):
     AT = attrib_orders()  # last-click атрибуція
     pm = {}  # pid -> (deliv, clk, orders, rev) — метрики кожної розсилки за період
     tot_deliv = tot_clk = tot_ord = 0; tot_rev = 0.0
-    mom = {}  # 'YYYY-MM' -> [розсилок, доставлено, кліки, замовлень, оборот]
+    mom = {}   # 'YYYY-MM' -> [розсилок, доставлено, кліки, замовлень, оборот]
+    segm = {}  # target -> те саме, по сегменту
     for pid, ts, target, text in allposts:
         deliv = n("select count(*) from sent where key=?", f"post:{pid}")
         clk = n("select count(distinct chat_id) from clicks where pid=?", pid)
         lst = AT.get(pid, []); orders = len(lst); rev = sum(a[0] for a in lst)
         pm[pid] = (deliv, clk, orders, rev)
         tot_deliv += deliv; tot_clk += clk; tot_ord += orders; tot_rev += rev
-        b = mom.setdefault(time.strftime("%Y-%m", time.localtime(ts)), [0, 0, 0, 0, 0.0])
-        b[0] += 1; b[1] += deliv; b[2] += clk; b[3] += orders; b[4] += rev
+        for bucket in (mom.setdefault(time.strftime("%Y-%m", time.localtime(ts)), [0, 0, 0, 0, 0.0]),
+                       segm.setdefault(target or "усі", [0, 0, 0, 0, 0.0])):
+            bucket[0] += 1; bucket[1] += deliv; bucket[2] += clk; bucket[3] += orders; bucket[4] += rev
     posts = allposts[:50]
     rows = ""
     for pid, ts, target, text in posts:
@@ -2365,6 +2367,13 @@ def posts_page(d_from="", d_to=""):
     mom_html = ('<section class="p wide"><h2>📊 Динаміка по місяцях <small>CTR = кліки/доставлено · конв. = замовлення/доставлено</small></h2>'
         "<table><tr><th>Місяць</th><th class=n>Розсилок</th><th class=n>Доставлено</th><th class=n>Кліки</th><th class=n>CTR</th><th class=n>Замовлень</th><th class=n>Конв.</th><th class=n>Оборот</th><th class=n>Сер.чек</th></tr>"
         f"{mom_rows or '<tr><td>нема даних за період</td></tr>'}</table></section>")
+    seg_rows = ""
+    for tgt, (p, dv, ck, od, rv) in sorted(segm.items(), key=lambda x: (x[1][3] / x[1][1] if x[1][1] else 0), reverse=True):
+        seg_rows += (f"<tr><td>{SEG_UA.get(tgt, tgt)}</td><td class=n>{p}</td><td class=n>{dv}</td><td class=n>{ck}</td><td class=n>{pct(ck, dv)}</td>"
+                     f"<td class=n>{od}</td><td class=n><b>{pct(od, dv)}</b></td><td class=n>{grn(rv)}</td><td class=n>{grn(rv / od) if od else '—'}</td></tr>")
+    seg_html = ('<section class="p wide"><h2>🎯 По сегментах <small>відсортовано за конверсією — кому слати вигідніше</small></h2>'
+        "<table><tr><th>Сегмент</th><th class=n>Розсилок</th><th class=n>Доставлено</th><th class=n>Кліки</th><th class=n>CTR</th><th class=n>Замовлень</th><th class=n>Конв.</th><th class=n>Оборот</th><th class=n>Сер.чек</th></tr>"
+        f"{seg_rows or '<tr><td>нема даних за період</td></tr>'}</table></section>")
     cards = [("Розсилок", len(allposts)), ("Доставлено", tot_deliv), ("Кліків", tot_clk), ("CTR", agg_ctr),
              ("Замовлень", tot_ord), ("Конверсія", agg_conv), ("Оборот, грн", grn(tot_rev)),
              ("Сер. чек", avg_check), ("Дохід/розсилку", rev_per), ("🚫 Заблокували", tot_block)]
@@ -2378,6 +2387,7 @@ def posts_page(d_from="", d_to=""):
 <div class=tiles>{"".join(f'<div class=tile><b>{v}</b><span>{k}</span></div>' for k, v in cards)}</div>
 <div class=grid>
 {mom_html}
+{seg_html}
 <section class="p wide"><h2>Надіслані розсилки <small>останні 50 · замовлення/оборот — отримувачі протягом 7 днів після</small></h2>
 <table><tr><th>Коли</th><th>Сегмент</th><th class=n>Доставлено</th><th class=n>Кліки</th><th class=n>CTR</th><th class=n>Замовлень</th><th class=n>Конв.</th><th class=n>Оборот</th><th>Текст</th></tr>{rows or '<tr><td>ще не було розсилок — надішліть /post у боті</td></tr>'}</table></section>
 <section class="p"><h2>Результат по магазинах <small>замовлення отримувачів розсилок, 7 днів</small></h2>
