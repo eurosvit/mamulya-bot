@@ -598,6 +598,12 @@ def parse_button(body):
 
 def resolve_ids(seg):
     seg = (seg or "").lower()
+    if "~" in seg:   # виключення: A~B = з A прибрати B (напр. all~bought:іпсіт — усі, крім покупців хіпсіта)
+        parts = seg.split("~")
+        base = set(resolve_ids(parts[0]))
+        for p in parts[1:]:
+            if p: base -= set(resolve_ids(p))
+        return list(base)
     if "+" in seg:   # обʼєднання сегментів: bought:вагітн|годуюч+nobuy
         out = set()
         for part in seg.split("+"):
