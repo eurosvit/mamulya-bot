@@ -184,6 +184,22 @@ assert fix_email("a@gmial.com") == "a@gmail.com" and fix_email("a@ukr.ne") == "a
 assert fix_email("a@gmail.com") == "a@gmail.com" and fix_email("a@ymail.com") == "a@gmail.com"
 assert fix_email("a@mycompany.com") == "a@mycompany.com" and fix_email("bad") == "bad"
 
+MX_CACHE = {}  # домен -> чи є поштові сервери (щоб не питати DNS щоразу)
+def domain_has_mx(dom):
+    # перевіряємо через Cloudflare DoH: є MX або A → домен приймає пошту. Нема — гарантований баунс.
+    dom = (dom or "").lower().strip()
+    if not dom: return False
+    if dom in MX_CACHE: return MX_CACHE[dom]
+    try:
+        for typ in ("MX", "A"):
+            req = urllib.request.Request(f"https://cloudflare-dns.com/dns-query?name={urllib.parse.quote(dom)}&type={typ}",
+                                         headers={"accept": "application/dns-json", "User-Agent": "mamulya-bot"})
+            if json.load(urllib.request.urlopen(req, timeout=6)).get("Answer"):
+                MX_CACHE[dom] = True; return True
+        MX_CACHE[dom] = False; return False
+    except Exception as e:
+        print("mx-check", dom, e); return True  # fail-open: на збої DNS не блокуємо відправку
+
 def send_email(to, subject, html):
     # транзакційний лист через Resend; тихо вимкнено, якщо нема RESEND_API_KEY
     global LAST_MAIL_ERR
@@ -192,6 +208,9 @@ def send_email(to, subject, html):
     key = os.environ.get("RESEND_API_KEY", "")
     if not key or "@" not in (to or ""):
         LAST_MAIL_ERR = "no key or bad email"; return False
+    dom = to.rpartition("@")[2]
+    if not domain_has_mx(dom):  # мертвий/опечатаний домен — не шлемо, щоб не ловити баунс
+        LAST_MAIL_ERR = f"skip: домен без пошти ({dom})"; print("email-skip-nomx", to); return False
     data = json.dumps({"from": MAIL_FROM, "to": [to], "reply_to": MAIL_REPLY, "subject": subject, "html": html}).encode()
     req = urllib.request.Request("https://api.resend.com/emails", data=data,
                                  headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
