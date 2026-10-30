@@ -2051,7 +2051,7 @@ class Hook(BaseHTTPRequestHandler):
             self.wfile.write(near_page().encode()); return
         if u.path == "/posts" and authed:
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
-            self.wfile.write(posts_page(qs.get("from", [""])[0], qs.get("to", [""])[0]).encode()); return
+            self.wfile.write(posts_page(qs.get("month", [""])[0]).encode()); return
         if u.path == "/kpi" and authed:
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
             self.wfile.write(kpi_page(qs.get("store", [None])[0]).encode()); return
@@ -2227,7 +2227,7 @@ def attrib_orders():
             res[pid].append((amt or 0, items, ots, phone, nm, store))
     return res
 
-def posts_page(d_from="", d_to=""):
+def posts_page(month=""):
     AK = os.environ.get("ADMIN_KEY", "")
     q = lambda sql, *a: DB.execute(sql, a).fetchall()
     n = lambda sql, *a: DB.execute(sql, a).fetchone()[0]
@@ -2235,15 +2235,13 @@ def posts_page(d_from="", d_to=""):
     SEG_UA = {"nobuy": "🆕 без покупок", "buyers": "💜 покупці", "vip": "⭐ VIP", "sleeping": "😴 сплячі", "near": "✨ за крок до рівня", "doman": "🧒 Домана/Ліполенд",
               "pregnant": "вагітність", "m0_3": "0–3 міс", "m3_6": "3–6 міс", "m6_12": "6–12 міс", "lipoland": "Lipoland", "postpartum": "🤱 постпартум",
               "Mamulya.lviv": "Mamulya", "Modnamama": "Modnamama", "Znana Mama": "Znana", "всі": "усім"}
-    # фільтр періоду (?from=YYYY-MM-DD&to=…); без нього — усі розсилки
-    def _dts(s, end=False):
-        try: return time.mktime(time.strptime(s, "%Y-%m-%d")) + (86399 if end else 0)
-        except Exception: return None
-    ts_from, ts_to = _dts(d_from), _dts(d_to, True)
-    wsql = ""; wp = []
-    if ts_from is not None: wsql += " and ts>=?"; wp.append(ts_from)
-    if ts_to is not None: wsql += " and ts<=?"; wp.append(ts_to)
-    allposts = q(f"select id, ts, target, text from posts where 1=1{wsql} order by ts desc", *wp)
+    # фільтр по місяцю (?month=YYYY-MM); без нього — усі
+    all_months = [r[0] for r in q("select distinct strftime('%Y-%m', ts, 'unixepoch', 'localtime') m from posts order by m desc")]
+    if month not in all_months: month = ""
+    if month:
+        allposts = q("select id, ts, target, text from posts where strftime('%Y-%m', ts, 'unixepoch', 'localtime')=? order by ts desc", month)
+    else:
+        allposts = q("select id, ts, target, text from posts order by ts desc")
     mail_rows = ""
     for kind, cnt, op, cl, ent, nu in q("select kind, count(*), sum(case when opened>0 then 1 else 0 end), sum(case when clicked>0 then 1 else 0 end), sum(case when entered>0 then 1 else 0 end), sum(newuser) from maillog group by kind order by kind"):
         op, cl, ent, nu = op or 0, cl or 0, ent or 0, nu or 0
@@ -2357,13 +2355,17 @@ def posts_page(d_from="", d_to=""):
         p, dv, ck, od, rv = mom[ym]
         mom_rows += (f"<tr><td>{ym}</td><td class=n>{p}</td><td class=n>{dv}</td><td class=n>{ck}</td><td class=n>{pct(ck, dv)}</td>"
                      f"<td class=n>{od}</td><td class=n>{pct(od, dv)}</td><td class=n>{grn(rv)}</td><td class=n>{grn(rv / od) if od else '—'}</td></tr>")
+    MON_UA = {"01": "Січень", "02": "Лютий", "03": "Березень", "04": "Квітень", "05": "Травень", "06": "Червень",
+              "07": "Липень", "08": "Серпень", "09": "Вересень", "10": "Жовтень", "11": "Листопад", "12": "Грудень"}
+    mlabel = lambda m: f"{MON_UA.get(m[5:7], m[5:7])} {m[:4]}"
+    opts = "<option value=''" + (" selected" if not month else "") + ">усі місяці</option>" + "".join(
+        f"<option value='{m}'{' selected' if m == month else ''}>{mlabel(m)}</option>" for m in all_months)
     filter_form = ("<form method=get class=p style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 14px;padding:10px 14px'>"
         f"<input type=hidden name=key value='{AK}'>"
-        "<b style=font-size:14px>Період:</b>"
-        f"<input type=date name=from value='{d_from}' style='padding:4px 8px'> — <input type=date name=to value='{d_to}' style='padding:4px 8px'>"
-        "<button type=submit style='padding:5px 14px'>Показати</button>"
-        + (f"<a href='/posts?key={AK}' style='font-size:13px;color:var(--ink3)'>скинути</a>" if (d_from or d_to) else "")
-        + "<span style='font-size:12px;color:var(--ink3);margin-left:auto'>метрики нижче — за обраний період</span></form>")
+        "<b style=font-size:14px>Місяць:</b>"
+        f"<select name=month onchange='this.form.submit()' style='padding:5px 10px'>{opts}</select>"
+        "<noscript><button type=submit style='padding:5px 14px'>Показати</button></noscript>"
+        "<span style='font-size:12px;color:var(--ink3);margin-left:auto'>метрики нижче — за обраний місяць</span></form>")
     mom_html = ('<section class="p wide"><h2>📊 Динаміка по місяцях <small>CTR = кліки/доставлено · конв. = замовлення/доставлено</small></h2>'
         "<table><tr><th>Місяць</th><th class=n>Розсилок</th><th class=n>Доставлено</th><th class=n>Кліки</th><th class=n>CTR</th><th class=n>Замовлень</th><th class=n>Конв.</th><th class=n>Оборот</th><th class=n>Сер.чек</th></tr>"
         f"{mom_rows or '<tr><td>нема даних за період</td></tr>'}</table></section>")
