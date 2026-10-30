@@ -2381,7 +2381,7 @@ def posts_page(month=""):
         f"<select name=month onchange='this.form.submit()' style='padding:5px 10px'>{opts}</select>"
         "<noscript><button type=submit style='padding:5px 14px'>Показати</button></noscript>"
         "<span style='font-size:12px;color:var(--ink3);margin-left:auto'>метрики нижче — за обраний місяць</span></form>")
-    mom_html = ('<section class="p wide"><h2>📊 Динаміка по місяцях <small>норма (owned-база): CTR 🟢≥3% 🟠1–3% 🔴&lt;1% · конв. 🟢≥1% 🟠0.3–1% 🔴&lt;0.3% · у дужках кількість</small></h2>'
+    mom_html = ('<section class="p wide"><h2>📊 Динаміка по місяцях <small>у дужках — кількість</small></h2>'
         "<table><tr><th>Місяць</th><th class=n>Розсилок</th><th class=n>Доставлено</th><th class=n>CTR</th><th class=n>Конв.</th><th class=n>Оборот</th><th class=n>Сер.чек</th><th class=n>Підписників</th><th class=n>+Нових</th><th class=n>−Відписалось</th></tr>"
         f"{mom_rows or '<tr><td>нема даних за період</td></tr>'}</table></section>")
     seg_rows = ""
