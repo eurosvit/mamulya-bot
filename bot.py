@@ -2347,10 +2347,10 @@ def posts_page(month=""):
     # 📊 агрегати + динаміка (формат як у KPI: % жирним + (кількість) сірим)
     pct = lambda a, b: f"{a/b*100:.0f}%" if b else "—"
     grn = lambda v: f"{v:,.0f}".replace(",", " ")
-    def rate(num, den):  # KPI-стиль: <b>12.3%</b> (count)
+    def rate(num, den, good, warn):  # KPI-стиль + бенчмарк-колір: 🟢≥good 🟠≥warn 🔴<warn
         if not den: return "—"
         p = num / den * 100
-        col = "#2E8B57" if p > 0 else "#A1939A"
+        col = "#2E8B57" if p >= good else "#A86A1F" if p >= warn else "#B8325A"
         return f"<b style=color:{col}>{p:.1f}%</b> <span style=color:#A1939A;font-weight:400>({num})</span>"
     MON_UA = {"01": "Січень", "02": "Лютий", "03": "Березень", "04": "Квітень", "05": "Травень", "06": "Червень",
               "07": "Липень", "08": "Серпень", "09": "Вересень", "10": "Жовтень", "11": "Листопад", "12": "Грудень"}
@@ -2362,7 +2362,7 @@ def posts_page(month=""):
     for ym in sorted(mom, reverse=True):
         p, dv, ck, od, rv = mom[ym]
         mom_rows += (f"<tr><td>{mlabel(ym)}</td><td class=n>{p}</td><td class=n>{dv}</td>"
-                     f"<td class=n>{rate(ck, dv)}</td><td class=n>{rate(od, dv)}</td>"
+                     f"<td class=n>{rate(ck, dv, 3, 1)}</td><td class=n>{rate(od, dv, 1, 0.3)}</td>"
                      f"<td class=n>{grn(rv)}</td><td class=n>{grn(rv / od) if od else '—'}</td></tr>")
     opts = "<option value=''" + (" selected" if not month else "") + ">усі місяці</option>" + "".join(
         f"<option value='{m}'{' selected' if m == month else ''}>{mlabel(m)}</option>" for m in all_months)
@@ -2372,13 +2372,13 @@ def posts_page(month=""):
         f"<select name=month onchange='this.form.submit()' style='padding:5px 10px'>{opts}</select>"
         "<noscript><button type=submit style='padding:5px 14px'>Показати</button></noscript>"
         "<span style='font-size:12px;color:var(--ink3);margin-left:auto'>метрики нижче — за обраний місяць</span></form>")
-    mom_html = ('<section class="p wide"><h2>📊 Динаміка по місяцях <small>CTR = кліки/доставлено · конв. = замовлення/доставлено · у дужках кількість</small></h2>'
+    mom_html = ('<section class="p wide"><h2>📊 Динаміка по місяцях <small>норма (owned-база): CTR 🟢≥3% 🟠1–3% 🔴&lt;1% · конв. 🟢≥1% 🟠0.3–1% 🔴&lt;0.3% · у дужках кількість</small></h2>'
         "<table><tr><th>Місяць</th><th class=n>Розсилок</th><th class=n>Доставлено</th><th class=n>CTR</th><th class=n>Конв.</th><th class=n>Оборот</th><th class=n>Сер.чек</th></tr>"
         f"{mom_rows or '<tr><td>нема даних за період</td></tr>'}</table></section>")
     seg_rows = ""
     for tgt, (p, dv, ck, od, rv) in sorted(segm.items(), key=lambda x: (x[1][3] / x[1][1] if x[1][1] else 0), reverse=True):
         seg_rows += (f"<tr><td>{SEG_UA.get(tgt, tgt)}</td><td class=n>{p}</td><td class=n>{dv}</td>"
-                     f"<td class=n>{rate(ck, dv)}</td><td class=n>{rate(od, dv)}</td>"
+                     f"<td class=n>{rate(ck, dv, 3, 1)}</td><td class=n>{rate(od, dv, 1, 0.3)}</td>"
                      f"<td class=n>{grn(rv)}</td><td class=n>{grn(rv / od) if od else '—'}</td></tr>")
     seg_html = ('<section class="p wide"><h2>🎯 По сегментах <small>відсортовано за конверсією — кому слати вигідніше · у дужках кількість</small></h2>'
         "<table><tr><th>Сегмент</th><th class=n>Розсилок</th><th class=n>Доставлено</th><th class=n>CTR</th><th class=n>Конв.</th><th class=n>Оборот</th><th class=n>Сер.чек</th></tr>"
