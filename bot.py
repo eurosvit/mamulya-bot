@@ -2101,6 +2101,22 @@ class Hook(BaseHTTPRequestHandler):
                 except Exception as e: out.append(f"{s}: ERR {e}")
             self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
             self.wfile.write(("\n".join(out) or "дай ?seg=").encode()); return
+        if u.path == "/badmails" and authed:  # скільки битих email по місяцях (опечатка/мертвий домен)
+            rows = DB.execute("select strftime('%Y-%m', sent, 'unixepoch', 'localtime') ym, email from maillog where coalesce(email,'')!=''").fetchall()
+            first = {}  # email -> перший місяць появи
+            for ym, em in rows:
+                if em not in first: first[em] = ym or "?"
+            dcache = {}; bym = {}
+            for em, ym in first.items():
+                dom = fix_email(em).rpartition("@")[2].lower()
+                bad = dcache.get(dom)
+                if bad is None: bad = (not domain_has_mx(dom)); dcache[dom] = bad
+                b = bym.setdefault(ym, [0, 0]); b[0] += 1; b[1] += (1 if bad else 0)
+            lines = [f"{ym}: битих {bad} із {tot} ({bad*100//tot if tot else 0}%)" for ym, (tot, bad) in sorted(bym.items(), reverse=True)]
+            tot_all = sum(t for t, _ in bym.values()); bad_all = sum(b for _, b in bym.values())
+            lines.append(f"РАЗОМ: {bad_all} битих із {tot_all}")
+            self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
+            self.wfile.write(("\n".join(lines) or "нема логів").encode()); return
         if u.path == "/testdeliv" and authed:  # тест листа «забрали»: /testdeliv?key=&to=&total=12000&gift=0
             to = qs.get("to", [""])[0].strip()
             total = float(qs.get("total", ["12000"])[0] or 0)
