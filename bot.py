@@ -57,6 +57,9 @@ except Exception: pass
 for _c in ("seo_sold", "seo_rev", "seo_new", "seo_den", "seo_sess", "returned"):
     try: DB.execute(f"alter table kpi_cache add column {_c} int default 0")
     except Exception: pass
+try: DB.execute("alter table kpi_cache add column canc_amt real default 0")  # сума скасованих замовлень
+except Exception: pass
+DB.execute("create table if not exists recovered(order_id text primary key, ts real, amount real)")  # NOREPLY-повернені (клієнт підтвердив після нуджа)
 try: DB.execute("alter table scheduled add column img text default ''")
 except Exception: pass
 try: DB.execute("alter table customers add column blocked real default 0")  # коли заблокував/видалив бота (ts), 0 = активний
@@ -1148,7 +1151,7 @@ def kpi_refresh():
             orders = pull_all(sajts)
         except Exception as e:
             print("kpi_pull", store, e); continue
-        M = defaultdict(lambda: {"zay": 0, "canc": 0, "decl": 0, "sold": 0, "returned": 0, "seo_sold": 0, "seo_rev": 0.0})
+        M = defaultdict(lambda: {"zay": 0, "canc": 0, "canc_amt": 0.0, "decl": 0, "sold": 0, "returned": 0, "seo_sold": 0, "seo_rev": 0.0})
         # повторні рахуємо ЛИШЕ по SOLD (реально отримане) — інакше ловимо дублі-заявки
         first = {}
         for ph, ot, st, camp, amt in orders:
@@ -1161,7 +1164,7 @@ def kpi_refresh():
             organic = not camp   # «без реклами» (порожня кампанія) = органіка/прямі = SEO
             if st not in (15, 8):           # чисті заявки (без тесту/видалених)
                 d = M[ym]; d["zay"] += 1
-                if st == 13: d["canc"] += 1
+                if st == 13: d["canc"] += 1; d["canc_amt"] += amt
                 if st == 6: d["decl"] += 1
                 if st == 5: d["sold"] += 1
                 if st == 7: d["returned"] += 1   # Повернення — повернули гроші після викупу (менеджер)
@@ -1178,9 +1181,9 @@ def kpi_refresh():
             if ym < "2026-01": continue
             B = buyers.get(ym, set()); R = repeat.get(ym, set())
             sb = seo_buyers.get(ym, set()); sn = seo_new.get(ym, set())
-            DB.execute("insert into kpi_cache(store,ym,zay,canc,decl,sold,updated,ret_num,ret_den,seo_sold,seo_rev,seo_new,seo_den,returned) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
-                       "on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated,ret_num=excluded.ret_num,ret_den=excluded.ret_den,seo_sold=excluded.seo_sold,seo_rev=excluded.seo_rev,seo_new=excluded.seo_new,seo_den=excluded.seo_den,returned=excluded.returned",
-                       (store, ym, d["zay"], d["canc"], d["decl"], d["sold"], time.time(), len(R), len(B), d["seo_sold"], round(d["seo_rev"]), len(sn), len(sb), d["returned"]))
+            DB.execute("insert into kpi_cache(store,ym,zay,canc,decl,sold,updated,ret_num,ret_den,seo_sold,seo_rev,seo_new,seo_den,returned,canc_amt) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                       "on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated,ret_num=excluded.ret_num,ret_den=excluded.ret_den,seo_sold=excluded.seo_sold,seo_rev=excluded.seo_rev,seo_new=excluded.seo_new,seo_den=excluded.seo_den,returned=excluded.returned,canc_amt=excluded.canc_amt",
+                       (store, ym, d["zay"], d["canc"], d["decl"], d["sold"], time.time(), len(R), len(B), d["seo_sold"], round(d["seo_rev"]), len(sn), len(sb), d["returned"], round(d["canc_amt"])))
         DB.commit()
         prop = GA_PROPS.get(store, "")  # Mamulya + AntiAge мають GA4-property (той самий SA)
         if prop:
@@ -1600,6 +1603,13 @@ def done_page(kind):
 def info_page(text):
     return page_shell('<div class="ok gray"><div class=ic>•</div><p class=muted style="line-height:1.6">%s</p></div>' % esc(text))
 
+def mark_recovered(oid, o):
+    # клієнт підтвердив замовлення, що було в NOREPLY → це повернений нуджем
+    try:
+        if DB.execute("select 1 from noreply where order_id=?", (str(oid),)).fetchone():
+            DB.execute("insert or ignore into recovered values(?,?,?)", (str(oid), time.time(), float(o.get("paymentAmount") or 0))); DB.commit()
+    except Exception as e: print("recovered", e)
+
 def handle_confirm(oid, do, reason, test=False, token=""):
     """Повертає (html_bytes, extra) для /confirm. extra={'liqpay':(data,sign)} якщо треба оплата."""
     try: o = sd_order(oid)
@@ -1617,7 +1627,7 @@ def handle_confirm(oid, do, reason, test=False, token=""):
         return info_page("Це замовлення вже закрите. Якщо це помилка — зателефонуйте нам."), None
     is_dep = bool(o.get("_cod"))
     if do == "confirm" and not is_dep:
-        sd_update(oid, {"statusId": ST_CONFIRMED}); return done_page("confirmed"), None
+        sd_update(oid, {"statusId": ST_CONFIRMED}); mark_recovered(oid, o); return done_page("confirmed"), None
     if do == "decline":
         data = {"statusId": ST_CANCELLED}
         if reason in REASON_OK: data["rejectionReasonId"] = int(reason)
@@ -1657,7 +1667,7 @@ def cfm_do(chat_id, oid, reason):
         st = int(o.get("statusId") or 0)
         if reason is None:
             if st in (ST_CANCELLED, 6, 7, 8, 15): return send(chat_id, "Це замовлення вже закрите.")
-            sd_update(oid, {"statusId": ST_CONFIRMED})
+            sd_update(oid, {"statusId": ST_CONFIRMED}); mark_recovered(oid, o)
             return send(chat_id, f"Дякуємо! Замовлення №{oid} підтверджено ✅ Готуємо до відправки 💚")
         data = {"statusId": ST_CANCELLED}
         if reason in REASON_OK: data["rejectionReasonId"] = int(reason)
@@ -2101,6 +2111,13 @@ class Hook(BaseHTTPRequestHandler):
                 except Exception as e: out.append(f"{s}: ERR {e}")
             self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
             self.wfile.write(("\n".join(out) or "дай ?seg=").encode()); return
+        if u.path == "/noreplyn" and authed:  # NOREPLY-повернені по місяцях (кількість + сума)
+            rows = DB.execute("select strftime('%Y-%m', ts, 'unixepoch', 'localtime') ym, count(*), coalesce(sum(amount),0) from recovered group by ym order by ym desc").fetchall()
+            cur = DB.execute("select count(*) from noreply").fetchone()[0]
+            lines = [f"{ym}: повернено {c} на {a:,.0f} грн".replace(",", " ") for ym, c, a in rows] or ["ще нема повернених (трекінг з цього деплою)"]
+            lines.append(f"зараз у NOREPLY (чекають): {cur}")
+            self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
+            self.wfile.write("\n".join(lines).encode()); return
         if u.path == "/badmails" and authed:  # скільки битих email по місяцях (опечатка/мертвий домен)
             rows = DB.execute("select strftime('%Y-%m', sent, 'unixepoch', 'localtime') ym, email from maillog where coalesce(email,'')!=''").fetchall()
             first = {}  # email -> перший місяць появи
@@ -2578,7 +2595,8 @@ def kpi_page(store=None):
     STORE = store if store in all_stores else all_stores[0]
     sw = "".join(f'<a class="{"on" if s==STORE else ""}" href="/kpi?key={AK}&store={urllib.parse.quote(s)}">{s}</a>' for s in all_stores)
     UA_MON = ["", "січень", "лютий", "березень", "квітень", "травень", "червень", "липень", "серпень", "вересень", "жовтень", "листопад", "грудень"]
-    rows = DB.execute("select ym, zay, canc, decl, sold, ret_num, ret_den, returned from kpi_cache where store=? order by ym desc", (STORE,)).fetchall()
+    rows = DB.execute("select ym, zay, canc, decl, sold, ret_num, ret_den, returned, coalesce(canc_amt,0) from kpi_cache where store=? order by ym desc", (STORE,)).fetchall()
+    money = lambda v: f"{v or 0:,.0f}".replace(",", " ")
     upd = DB.execute("select max(updated) from kpi_cache").fetchone()[0]
     upd_s = time.strftime("%d.%m %H:%M", time.localtime(upd)) if upd else "—"
     def cell(num, den, color, good=None, hi=None):
@@ -2590,12 +2608,14 @@ def kpi_page(store=None):
         return f"<td style=color:{col}><b>{p:.1f}%</b> <span style=color:#A1939A;font-weight:400>({num})</span></td>"
     out = ""
     tz = tc = td_ = ts = trn = trd = tret = 0
-    for ym, zay, canc, decl, sold, rn, rd, ret in rows:
+    tca = 0
+    for ym, zay, canc, decl, sold, rn, rd, ret, camt in rows:
         if ym < "2026-09": continue   # KPI-скасування рахуємо з вересня
         y, mm = ym.split("-"); nm = f"{UA_MON[int(mm)]} {y}"
-        tz += zay; tc += canc; td_ += decl; ts += sold; trn += rn; trd += rd; tret += (ret or 0)
+        tz += zay; tc += canc; td_ += decl; ts += sold; trn += rn; trd += rd; tret += (ret or 0); tca += (camt or 0)
         out += (f"<tr><td>{nm}</td><td>{zay}</td>"
                 + cell(canc, zay, "#B8325A", hi=18)
+                + f"<td class=n style=color:#B8325A>{money(camt)} грн</td>"
                 + cell(decl, zay, "#A86A1F")
                 + cell(sold, zay, "#2E8B57")
                 + cell(ret or 0, zay, "#A86A1F")
@@ -2603,6 +2623,7 @@ def kpi_page(store=None):
     if rows:
         out += (f"<tr style=border-top:2px solid #E8DCD8;font-weight:700><td>Разом</td><td>{tz}</td>"
                 + cell(tc, tz, "#B8325A", hi=18)
+                + f"<td class=n style=color:#B8325A>{money(tca)} грн</td>"
                 + cell(td_, tz, "#A86A1F")
                 + cell(ts, tz, "#2E8B57")
                 + cell(tret, tz, "#A86A1F")
@@ -2618,7 +2639,7 @@ def kpi_page(store=None):
 <div class=nav style=margin-top:-6px>{sw}</div>
 <div class=grid>
 <section class="p wide"><h2>KPI по місяцях <small>{STORE} · джерело SalesDrive · % і кількість у дужках</small></h2>
-<table id=kt><tr><th>Місяць</th><th>Заявки</th><th>Скасовано ≤18%</th><th>Відмова</th><th>Продано</th><th>Повернення</th><th>Повторні ≥15%</th></tr>{out or ('<tr><td>ще не завантажено — тисни «Оновити з SalesDrive»</td></tr>' if empty else '')}</table>
+<table id=kt><tr><th>Місяць</th><th>Заявки</th><th>Скасовано ≤18%</th><th>Сума скасов.</th><th>Відмова</th><th>Продано</th><th>Повернення</th><th>Повторні ≥15%</th></tr>{out or ('<tr><td>ще не завантажено — тисни «Оновити з SalesDrive»</td></tr>' if empty else '')}</table>
 <div style=color:#6E5F65;font-size:12.5px;margin-top:8px>
 <p style=margin:0 0 6px>У кожній клітинці — <b>% (кількість)</b>.</p>
 <ul style=margin:0;padding-left:18px;line-height:1.75>
