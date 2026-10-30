@@ -2360,7 +2360,7 @@ def posts_page(month=""):
     mlabel = lambda m: f"{MON_UA.get(m[5:7], m[5:7])} {m[:4]}"
     opts = "<option value=''" + (" selected" if not month else "") + ">усі місяці</option>" + "".join(
         f"<option value='{m}'{' selected' if m == month else ''}>{mlabel(m)}</option>" for m in all_months)
-    filter_form = ("<form method=get class=p style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 14px;padding:10px 14px'>"
+    filter_form = ("<form method=get class=p style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;max-width:1100px;margin:0 auto 14px;padding:10px 14px;box-sizing:border-box'>"
         f"<input type=hidden name=key value='{AK}'>"
         "<b style=font-size:14px>Місяць:</b>"
         f"<select name=month onchange='this.form.submit()' style='padding:5px 10px'>{opts}</select>"
