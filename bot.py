@@ -59,6 +59,8 @@ for _c in ("seo_sold", "seo_rev", "seo_new", "seo_den", "seo_sess", "returned"):
     except Exception: pass
 try: DB.execute("alter table kpi_cache add column canc_amt real default 0")  # сума скасованих замовлень
 except Exception: pass
+try: DB.execute("alter table kpi_cache add column sold_amt real default 0")  # сума проданих (SOLD) замовлень
+except Exception: pass
 DB.execute("create table if not exists recovered(order_id text primary key, ts real, amount real)")  # NOREPLY-повернені (клієнт підтвердив після нуджа)
 try: DB.execute("alter table scheduled add column img text default ''")
 except Exception: pass
@@ -1151,7 +1153,7 @@ def kpi_refresh():
             orders = pull_all(sajts)
         except Exception as e:
             print("kpi_pull", store, e); continue
-        M = defaultdict(lambda: {"zay": 0, "canc": 0, "canc_amt": 0.0, "decl": 0, "sold": 0, "returned": 0, "seo_sold": 0, "seo_rev": 0.0})
+        M = defaultdict(lambda: {"zay": 0, "canc": 0, "canc_amt": 0.0, "decl": 0, "sold": 0, "sold_amt": 0.0, "returned": 0, "seo_sold": 0, "seo_rev": 0.0})
         # повторні рахуємо ЛИШЕ по SOLD (реально отримане) — інакше ловимо дублі-заявки
         first = {}
         for ph, ot, st, camp, amt in orders:
@@ -1166,7 +1168,7 @@ def kpi_refresh():
                 d = M[ym]; d["zay"] += 1
                 if st == 13: d["canc"] += 1; d["canc_amt"] += amt
                 if st == 6: d["decl"] += 1
-                if st == 5: d["sold"] += 1
+                if st == 5: d["sold"] += 1; d["sold_amt"] += amt
                 if st == 7: d["returned"] += 1   # Повернення — повернули гроші після викупу (менеджер)
             if st == 5:                     # SOLD
                 if ph:
@@ -1181,9 +1183,9 @@ def kpi_refresh():
             if ym < "2026-01": continue
             B = buyers.get(ym, set()); R = repeat.get(ym, set())
             sb = seo_buyers.get(ym, set()); sn = seo_new.get(ym, set())
-            DB.execute("insert into kpi_cache(store,ym,zay,canc,decl,sold,updated,ret_num,ret_den,seo_sold,seo_rev,seo_new,seo_den,returned,canc_amt) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
-                       "on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated,ret_num=excluded.ret_num,ret_den=excluded.ret_den,seo_sold=excluded.seo_sold,seo_rev=excluded.seo_rev,seo_new=excluded.seo_new,seo_den=excluded.seo_den,returned=excluded.returned,canc_amt=excluded.canc_amt",
-                       (store, ym, d["zay"], d["canc"], d["decl"], d["sold"], time.time(), len(R), len(B), d["seo_sold"], round(d["seo_rev"]), len(sn), len(sb), d["returned"], round(d["canc_amt"])))
+            DB.execute("insert into kpi_cache(store,ym,zay,canc,decl,sold,updated,ret_num,ret_den,seo_sold,seo_rev,seo_new,seo_den,returned,canc_amt,sold_amt) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                       "on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated,ret_num=excluded.ret_num,ret_den=excluded.ret_den,seo_sold=excluded.seo_sold,seo_rev=excluded.seo_rev,seo_new=excluded.seo_new,seo_den=excluded.seo_den,returned=excluded.returned,canc_amt=excluded.canc_amt,sold_amt=excluded.sold_amt",
+                       (store, ym, d["zay"], d["canc"], d["decl"], d["sold"], time.time(), len(R), len(B), d["seo_sold"], round(d["seo_rev"]), len(sn), len(sb), d["returned"], round(d["canc_amt"]), round(d["sold_amt"])))
         DB.commit()
         prop = GA_PROPS.get(store, "")  # Mamulya + AntiAge мають GA4-property (той самий SA)
         if prop:
@@ -2595,7 +2597,7 @@ def kpi_page(store=None):
     STORE = store if store in all_stores else all_stores[0]
     sw = "".join(f'<a class="{"on" if s==STORE else ""}" href="/kpi?key={AK}&store={urllib.parse.quote(s)}">{s}</a>' for s in all_stores)
     UA_MON = ["", "січень", "лютий", "березень", "квітень", "травень", "червень", "липень", "серпень", "вересень", "жовтень", "листопад", "грудень"]
-    rows = DB.execute("select ym, zay, canc, decl, sold, ret_num, ret_den, returned, coalesce(canc_amt,0) from kpi_cache where store=? order by ym desc", (STORE,)).fetchall()
+    rows = DB.execute("select ym, zay, canc, decl, sold, ret_num, ret_den, returned, coalesce(canc_amt,0), coalesce(sold_amt,0) from kpi_cache where store=? order by ym desc", (STORE,)).fetchall()
     money = lambda v: f"{v or 0:,.0f}".replace(",", " ")
     upd = DB.execute("select max(updated) from kpi_cache").fetchone()[0]
     upd_s = time.strftime("%d.%m %H:%M", time.localtime(upd)) if upd else "—"
@@ -2608,16 +2610,17 @@ def kpi_page(store=None):
         return f"<td style=color:{col}><b>{p:.1f}%</b> <span style=color:#A1939A;font-weight:400>({num})</span></td>"
     out = ""
     tz = tc = td_ = ts = trn = trd = tret = 0
-    tca = 0
-    for ym, zay, canc, decl, sold, rn, rd, ret, camt in rows:
+    tca = tsa = 0
+    for ym, zay, canc, decl, sold, rn, rd, ret, camt, samt in rows:
         if ym < "2026-09": continue   # KPI-скасування рахуємо з вересня
         y, mm = ym.split("-"); nm = f"{UA_MON[int(mm)]} {y}"
-        tz += zay; tc += canc; td_ += decl; ts += sold; trn += rn; trd += rd; tret += (ret or 0); tca += (camt or 0)
+        tz += zay; tc += canc; td_ += decl; ts += sold; trn += rn; trd += rd; tret += (ret or 0); tca += (camt or 0); tsa += (samt or 0)
         out += (f"<tr><td>{nm}</td><td>{zay}</td>"
                 + cell(canc, zay, "#B8325A", hi=18)
                 + f"<td class=n style=color:#B8325A>{money(camt)} грн</td>"
                 + cell(decl, zay, "#A86A1F")
                 + cell(sold, zay, "#2E8B57")
+                + f"<td class=n style=color:#2E8B57>{money(samt)} грн</td>"
                 + cell(ret or 0, zay, "#A86A1F")
                 + cell(rn, rd, "#7C3AED", good=15) + "</tr>")
     if rows:
@@ -2626,6 +2629,7 @@ def kpi_page(store=None):
                 + f"<td class=n style=color:#B8325A>{money(tca)} грн</td>"
                 + cell(td_, tz, "#A86A1F")
                 + cell(ts, tz, "#2E8B57")
+                + f"<td class=n style=color:#2E8B57>{money(tsa)} грн</td>"
                 + cell(tret, tz, "#A86A1F")
                 + cell(trn, trd, "#7C3AED", good=15) + "</tr>")
     empty = not rows
@@ -2639,7 +2643,7 @@ def kpi_page(store=None):
 <div class=nav style=margin-top:-6px>{sw}</div>
 <div class=grid>
 <section class="p wide"><h2>KPI по місяцях <small>{STORE} · джерело SalesDrive · % і кількість у дужках</small></h2>
-<table id=kt><tr><th>Місяць</th><th>Заявки</th><th>Скасовано ≤18%</th><th>Сума скасов.</th><th>Відмова</th><th>Продано</th><th>Повернення</th><th>Повторні ≥15%</th></tr>{out or ('<tr><td>ще не завантажено — тисни «Оновити з SalesDrive»</td></tr>' if empty else '')}</table>
+<table id=kt><tr><th>Місяць</th><th>Заявки</th><th>Скасовано ≤18%</th><th>Сума скасов.</th><th>Відмова</th><th>Продано</th><th>Сума продано</th><th>Повернення</th><th>Повторні ≥15%</th></tr>{out or ('<tr><td>ще не завантажено — тисни «Оновити з SalesDrive»</td></tr>' if empty else '')}</table>
 <div style=color:#6E5F65;font-size:12.5px;margin-top:8px>
 <p style=margin:0 0 6px>У кожній клітинці — <b>% (кількість)</b>.</p>
 <ul style=margin:0;padding-left:18px;line-height:1.75>
