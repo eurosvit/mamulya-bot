@@ -2358,12 +2358,21 @@ def posts_page(month=""):
     agg_ctr = pct(tot_clk, tot_deliv); agg_conv = pct(tot_ord, tot_deliv)
     avg_check = grn(tot_rev / tot_ord) if tot_ord else "—"
     rev_per = grn(tot_rev / len(allposts)) if allposts else "—"
+    def _ym_end(ym):  # ts початку наступного місяця
+        y, m = int(ym[:4]), int(ym[5:7])
+        return time.mktime(((y + 1, 1) if m == 12 else (y, m + 1)) + (1, 0, 0, 0, 0, 0, -1))
     mom_rows = ""
     for ym in sorted(mom, reverse=True):
         p, dv, ck, od, rv = mom[ym]
+        joined = n("select count(*) from customers where strftime('%Y-%m', created, 'unixepoch', 'localtime')=?", ym)
+        churned = n("select count(*) from customers where coalesce(blocked,0)>0 and strftime('%Y-%m', blocked, 'unixepoch', 'localtime')=?", ym)
+        yme = _ym_end(ym)
+        active = n("select count(*) from customers where created<? and (coalesce(blocked,0)=0 or blocked>=?)", yme, yme)
+        churn_cell = f"<span style=color:#B8325A>−{churned}</span>" if churned else "0"
         mom_rows += (f"<tr><td>{mlabel(ym)}</td><td class=n>{p}</td><td class=n>{dv}</td>"
                      f"<td class=n>{rate(ck, dv, 3, 1)}</td><td class=n>{rate(od, dv, 1, 0.3)}</td>"
-                     f"<td class=n>{grn(rv)}</td><td class=n>{grn(rv / od) if od else '—'}</td></tr>")
+                     f"<td class=n>{grn(rv)}</td><td class=n>{grn(rv / od) if od else '—'}</td>"
+                     f"<td class=n><b>{active}</b></td><td class=n style=color:#2E8B57>+{joined}</td><td class=n>{churn_cell}</td></tr>")
     opts = "<option value=''" + (" selected" if not month else "") + ">усі місяці</option>" + "".join(
         f"<option value='{m}'{' selected' if m == month else ''}>{mlabel(m)}</option>" for m in all_months)
     filter_form = ("<form method=get class=p style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;max-width:1100px;margin:0 auto 14px;padding:10px 14px;box-sizing:border-box'>"
@@ -2373,7 +2382,7 @@ def posts_page(month=""):
         "<noscript><button type=submit style='padding:5px 14px'>Показати</button></noscript>"
         "<span style='font-size:12px;color:var(--ink3);margin-left:auto'>метрики нижче — за обраний місяць</span></form>")
     mom_html = ('<section class="p wide"><h2>📊 Динаміка по місяцях <small>норма (owned-база): CTR 🟢≥3% 🟠1–3% 🔴&lt;1% · конв. 🟢≥1% 🟠0.3–1% 🔴&lt;0.3% · у дужках кількість</small></h2>'
-        "<table><tr><th>Місяць</th><th class=n>Розсилок</th><th class=n>Доставлено</th><th class=n>CTR</th><th class=n>Конв.</th><th class=n>Оборот</th><th class=n>Сер.чек</th></tr>"
+        "<table><tr><th>Місяць</th><th class=n>Розсилок</th><th class=n>Доставлено</th><th class=n>CTR</th><th class=n>Конв.</th><th class=n>Оборот</th><th class=n>Сер.чек</th><th class=n>Підписників</th><th class=n>+Нових</th><th class=n>−Відписалось</th></tr>"
         f"{mom_rows or '<tr><td>нема даних за період</td></tr>'}</table></section>")
     seg_rows = ""
     for tgt, (p, dv, ck, od, rv) in sorted(segm.items(), key=lambda x: (x[1][3] / x[1][1] if x[1][1] else 0), reverse=True):
