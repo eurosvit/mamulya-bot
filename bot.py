@@ -1839,6 +1839,25 @@ class Hook(BaseHTTPRequestHandler):
                 except Exception as e: print("px", e)
             self.send_response(200); self.send_header("Content-Type", "image/gif"); self.send_header("Cache-Control", "no-store"); self.end_headers()
             self.wfile.write(base64.b64decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")); return
+        if u.path == "/watch" and authed:  # живий стан сторожа сайту
+            st, now = WATCH_STATE, time.time()
+            out = "🛡 Сторож Znana\n"
+            out += ("не запущений!\n" if not st["started"] else
+                    f"працює {int((now - st['started']) / 60)} хв, кіл перевірок: {st['runs']}, "
+                    f"останнє {int(now - st['last_run'])} с тому\n\n")
+            for name, url, _ in WATCH:
+                c = st["checks"].get(name)
+                if not c: out += f"? {name} — ще не перевіряв\n"; continue
+                mark = "🟢" if c["good"] else "🔴"
+                out += f"{mark} {name} — {int(now - c['at'])} с тому"
+                if not c["good"]: out += f" · {c['why']}"
+                if c["fail_count"]: out += f" · провалів від старту: {c['fail_count']}"
+                out += "\n"
+            out += "\nПослідні провали:\n"
+            out += "".join(f"{time.strftime('%d.%m %H:%M', time.localtime(t))} · {n} · {w}\n"
+                           for t, n, w in reversed(st["log"][-30:])) or "жодного від старту\n"
+            self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
+            self.wfile.write(out.encode()); return
         if u.path == "/clicksclean" and authed:  # прибрати синтетичні тест-кліки
             nd = DB.execute("delete from clicks where chat_id in (0, 88888)").rowcount
             DB.commit()
@@ -2907,28 +2926,43 @@ def watch_check(name, url, ok):
     except Exception as e:
         return (False, str(e)[:60])
 
+# Шлях до грошей: тут провал одразу коштує замовлення, тож кричимо з першого
+# разу. Решта може раз ікнути через мережу — для них лишаємо два поспіль.
+MONEY = {"Чекаут", "Пошук міст НП", "Відділення НП", "Скрипти сайту"}
+
+# Стан сторожа видно через /watch?key= — інакше «сторож не алертив» і
+# «сторожа немає» виглядають однаково.
+WATCH_STATE = {"started": 0, "last_run": 0, "runs": 0, "checks": {}, "log": []}
+
 def watchdog():
-    """Два провали поспіль — тривога, щоб не смикати через одну мережеву ікавку.
+    """Шлях до грошей — тривога з першого провалу, решта — з другого.
     Про відновлення теж пишемо: інакше не зрозуміло, чи воно само минулось."""
-    state = {}
+    WATCH_STATE["started"] = time.time()
     while True:
         for name, url, ok in WATCH:
             good, why = watch_check(name, url, ok)
-            st = state.setdefault(name, {"fails": 0, "told": False})
+            st = WATCH_STATE["checks"].setdefault(name, {"fails": 0, "told": False, "good": None, "at": 0, "why": "", "down_since": 0, "fail_count": 0})
+            st["good"], st["at"] = good, time.time()
             if good:
                 if st["told"]:
+                    mins = int((time.time() - (st["down_since"] or time.time())) / 60)
                     for a in ADMINS:
-                        try: send(a, f"🟢 <b>Znana: {name}</b> знову працює")
+                        try: send(a, f"🟢 <b>Znana: {name}</b> знову працює (лежало ~{mins} хв)")
                         except Exception: pass
-                st["fails"], st["told"] = 0, False
+                st["fails"], st["told"], st["down_since"], st["why"] = 0, False, 0, ""
                 continue
             st["fails"] += 1
-            if st["fails"] >= 2 and not st["told"]:
+            st["fail_count"] += 1
+            st["why"] = why
+            if not st["down_since"]: st["down_since"] = time.time()
+            WATCH_STATE["log"] = (WATCH_STATE["log"] + [(time.time(), name, why)])[-100:]
+            if st["fails"] >= (1 if name in MONEY else 2) and not st["told"]:
                 st["told"] = True
                 for a in ADMINS:
                     try: send(a, f"🔴 <b>Znana: {name}</b> не працює\n{why}\n{url}")
                     except Exception: pass
-        time.sleep(300)
+        WATCH_STATE["last_run"], WATCH_STATE["runs"] = time.time(), WATCH_STATE["runs"] + 1
+        time.sleep(120)
 
 if __name__ == "__main__":
     threading.Thread(target=watchdog, daemon=True).start()
