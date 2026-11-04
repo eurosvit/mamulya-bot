@@ -2686,6 +2686,20 @@ def kpi_page(store=None):
                 + cell(tret, tz, "#A86A1F")
                 + cell(trn, trd, "#7C3AED", good=15) + "</tr>")
     empty = not rows
+    nr_html = ""
+    if STORE == "Mamulya":   # NOREPLY-нудж трекаємо лише по Mamulya
+        nrows = DB.execute("select strftime('%Y-%m', ts, 'unixepoch', 'localtime') ym, count(*), coalesce(sum(amount),0) from recovered group by ym order by ym desc").fetchall()
+        waiting = DB.execute("select count(*) from noreply").fetchone()[0]
+        tn = sum(r[1] for r in nrows); ta = sum(r[2] for r in nrows)
+        mr = "".join(f"<tr><td>{UA_MON[int(r[0][5:7])]} {r[0][:4]}</td><td>{r[1]}</td><td style=color:#2E8B57;text-align:right>{money(r[2])} грн</td></tr>" for r in nrows)
+        tbody = (f"<table id=nrt><tr><th>Місяць</th><th>Повернено</th><th>Сума</th></tr>{mr}</table>"
+                 if nrows else "<p style=color:#A1939A;font-size:12.5px;margin:4px 0 0>Ще нема повернених — цифри наростатимуть з новими підтвердженнями після нуджа (трекінг з деплою).</p>")
+        nr_html = (f'<section class="p wide"><h2>↩ Повернені з NOREPLY <small>Mamulya · клієнт підтвердив замовлення після нуджа</small></h2>'
+                   f'<div class=tiles style=margin-bottom:10px>'
+                   f'<div class=tile><b>{tn}</b><span>Повернено нуджем</span></div>'
+                   f'<div class=tile><b>{money(ta)} грн</b><span>Сума повернених</span></div>'
+                   f'<div class=tile><b style=color:#A86A1F>{waiting}</b><span>Зараз у NOREPLY</span></div></div>'
+                   f'{tbody}</section>')
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>KPI — {STORE}</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
@@ -2695,6 +2709,7 @@ def kpi_page(store=None):
 {_nav("KPI", AK)}
 <div class=nav style=margin-top:-6px>{sw}</div>
 <div class=grid>
+{nr_html}
 <section class="p wide"><h2>KPI по місяцях <small>{STORE} · джерело SalesDrive · % і кількість у дужках</small></h2>
 <table id=kt><tr><th>Місяць</th><th>Заявки</th><th>Скасовано ≤18%</th><th>Сума скасов.</th><th>Відмова</th><th>Продано</th><th>Сума продано</th><th>Повернення</th><th>Повторні ≥15%</th></tr>{out or ('<tr><td>ще не завантажено — тисни «Оновити з SalesDrive»</td></tr>' if empty else '')}</table>
 <div style=color:#6E5F65;font-size:12.5px;margin-top:8px>
