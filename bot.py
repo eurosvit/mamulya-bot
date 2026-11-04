@@ -811,6 +811,39 @@ def on_text(chat_id, text):
             f"🎟 Активних купонів: {live}\n"
             f"🎟 Вільних кодів −150: {n('select count(*) from pool where chat_id is null')}\n"
             f"📦 Замовлень у базі: {n('select count(*) from orders')}")
+    if chat_id in ADMINS and t in ("/watch", "/storozh"):
+        st, now = WATCH_STATE, time.time()
+        if not st["started"]:
+            return send(chat_id, "🛡 Сторож <b>не запущений</b> — алертів не буде. Гляньте логи бота в Render.")
+        lines = [f"🛡 <b>Сторож сайту Znana</b>",
+                 f"працює {int((now - st['started']) / 60)} хв · перевірок: {st['runs']} · остання {int(now - st['last_run'])} с тому",
+                 f"кому пишемо: {len(ADMINS)} адмін(и){' — ти в списку' if chat_id in ADMINS else ''}", ""]
+        for name, _url, _ok in WATCH:
+            c = st["checks"].get(name)
+            if not c:
+                lines.append(f"▫️ {name} — ще не перевіряв"); continue
+            mark = "🟢" if c["good"] else "🔴"
+            tail = "" if c["good"] else f" · {c['why']}"
+            if c["fail_count"]: tail += f" · провалів: {c['fail_count']}"
+            lines.append(f"{mark} {name}{tail}")
+        log = st["log"][-10:]
+        lines.append("")
+        lines.append("<b>Останні провали:</b>")
+        lines += [f"{time.strftime('%d.%m %H:%M', time.localtime(x[0]))} · {x[1]} · {x[2]}" for x in reversed(log)] or ["жодного від старту бота"]
+        lines.append("")
+        lines.append("Перевірити, чи доходять тривоги: <code>/watchtest</code>")
+        return send(chat_id, "\n".join(lines))
+    if chat_id in ADMINS and t == "/watchtest":
+        # Той самий шлях, яким іде справжня тривога: якщо це повідомлення
+        # прийшло всім адмінам — значить алерти працюють.
+        ok, bad = [], []
+        for a in ADMINS:
+            try:
+                send(a, "🔴 <b>Znana: тестова тривога</b>\nЦе перевірка — сайт у порядку. Якщо ти це бачиш, справжні алерти теж дійдуть.")
+                ok.append(a)
+            except Exception as e:
+                bad.append(f"{a}: {str(e)[:60]}")
+        return send(chat_id, f"Надіслано {len(ok)} з {len(ADMINS)}." + (f"\nНе дійшло: {'; '.join(bad)}" if bad else " Усе гаразд ✅"))
     if chat_id in ADMINS and t == "/testspir":
         send_photo_url(chat_id, SPIR_BANNER, T["spir_offer"], [[("Оформити за 500 грн", BASE_URL + "/spir")]])
         return send(chat_id, "👆 Так виглядатиме авто-офер спіруліни клієнту.\nУвімкнути розсилку всім постпартум: <code>SPIR_OFFER_LIVE=1</code> у Render.")
@@ -1844,7 +1877,8 @@ class Hook(BaseHTTPRequestHandler):
             out = "🛡 Сторож Znana\n"
             out += ("не запущений!\n" if not st["started"] else
                     f"працює {int((now - st['started']) / 60)} хв, кіл перевірок: {st['runs']}, "
-                    f"останнє {int(now - st['last_run'])} с тому\n\n")
+                    f"останнє {int(now - st['last_run'])} с тому\n")
+            out += f"кому йдуть тривоги: {len(ADMINS)} адмін(и){' — ПОРОЖНЬО, алерти нікуди не підуть!' if not ADMINS else ''}\n\n"
             for name, url, _ in WATCH:
                 c = st["checks"].get(name)
                 if not c: out += f"? {name} — ще не перевіряв\n"; continue
@@ -2983,6 +3017,7 @@ def watchdog():
         time.sleep(120)
 
 if __name__ == "__main__":
+    print(f"сторож: адмінів для тривог — {len(ADMINS)}" + ("  ⚠️ ADMIN_IDS порожній, алерти нікуди не підуть" if not ADMINS else ""))
     threading.Thread(target=watchdog, daemon=True).start()
     threading.Thread(target=poll, daemon=True).start()
     if OLD_TOKEN: threading.Thread(target=poll_old, daemon=True).start()
