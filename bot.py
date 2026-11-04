@@ -2898,12 +2898,30 @@ WATCH = [
     ("Чекаут",             "https://znanamama.com.ua/checkout",                             lambda t: "Лишився один крок" in t),
     ("Пошук міст НП",      "https://znanamama.com.ua/api/np/cities?q=%D0%9A%D0%B8%D1%97%D0%B2", lambda t: '"ref"' in t),
     ("Відділення НП",      "https://znanamama.com.ua/api/np/warehouses?cityRef=8d5a980d-391c-11dd-90d9-001a92567626", lambda t: '"ref"' in t),
+    # дзеркало довідника НП — головна дорога чекауту; якщо лежить воно,
+    # клієнтка ще поїде через сайт, але знати про це треба одразу
+    ("Дзеркало міст НП",   "https://znana-stock.onrender.com/api/np/cities?q=%D0%9A%D0%B8%D1%97%D0%B2", lambda t: '"ref"' in t),
+    ("Дзеркало відділень", "https://znana-stock.onrender.com/api/np/warehouses?cityRef=e718a680-4b33-11e4-ab6d-005056801329", lambda t: '"ref"' in t),
+    ("Свіжість довідника", "https://znana-stock.onrender.com/api/np/status",                  lambda t: np_fresh(t)),
     ("Склад (фід)",        "https://znana-stock.onrender.com/export/rozetka.xml",            lambda t: "<offer" in t),
     ("Підрахунок кошика",  "https://znana-stock.onrender.com/api/health",                    lambda t: '"ok":true' in t.replace(" ", "")),
     # сторінка може відкритись, а скрипти не завантажитись — тоді нічого не
     # натискається, хоча «сайт працює». Тягнемо перший чанк із самої сторінки.
     ("Скрипти сайту",      "https://znanamama.com.ua/checkout",                             lambda t: chunk_ok(t)),
 ]
+
+def np_fresh(body):
+    """Копія довідника оновлюється раз на добу. Порожня або старша за три дні —
+    привід подивитись: нові відділення НП у нас просто не з'являються."""
+    try:
+        d = json.loads(body)
+        if int(d.get("settlements") or 0) < 20000 or int(d.get("warehouses") or 0) < 20000: return False
+        last = d.get("last")
+        if not last: return True          # ще жодного планового оновлення — не кричимо
+        age = time.time() - time.mktime(time.strptime(last[:19], "%Y-%m-%dT%H:%M:%S"))
+        return age < 3 * 86400
+    except Exception:
+        return False
 
 def chunk_ok(html):
     m = re.search(r'/_next/static/[^"\']+?\.js', html)
@@ -2928,7 +2946,7 @@ def watch_check(name, url, ok):
 
 # Шлях до грошей: тут провал одразу коштує замовлення, тож кричимо з першого
 # разу. Решта може раз ікнути через мережу — для них лишаємо два поспіль.
-MONEY = {"Чекаут", "Пошук міст НП", "Відділення НП", "Скрипти сайту"}
+MONEY = {"Чекаут", "Пошук міст НП", "Відділення НП", "Дзеркало міст НП", "Дзеркало відділень", "Скрипти сайту"}
 
 # Стан сторожа видно через /watch?key= — інакше «сторож не алертив» і
 # «сторожа немає» виглядають однаково.
