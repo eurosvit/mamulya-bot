@@ -1,7 +1,7 @@
 """Mamulya TG-бот лояльності. Тільки stdlib: long-polling Telegram + HTTP-вебхук SalesDrive + sqlite.
 ENV: BOT_TOKEN, SALESDRIVE_KEY, MEDUSA_URL, MEDUSA_KEY, DILA_CODE, BOT_NAME, PORT
 """
-import json, os, re, sqlite3, threading, time, urllib.request, urllib.parse, urllib.error
+import html, json, os, re, sqlite3, threading, time, urllib.request, urllib.parse, urllib.error
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 os.environ["TZ"] = "Europe/Kyiv"
 try: time.tzset()
@@ -793,6 +793,8 @@ def on_text(chat_id, text):
         return send(chat_id, STAGE_PITCH.get(st, T["stage_link"]) + "\n\nЗібрали все в одному місці 👇", [[("Відкрити добірку", url)]])
     if t == "💬 Менеджер":
         return send_support(chat_id)
+    if t.lower() in ("/znana", "znana", "🤍 znana mama"):
+        return znana_menu(chat_id)
     if chat_id in ADMINS and t.startswith("/demo"):
         st = (t.split() + ["pregnant"])[1]
         if st not in LIFECYCLE: return send(chat_id, "Стадії: " + ", ".join(LIFECYCLE))
@@ -966,6 +968,95 @@ def on_contact(chat_id, phone):
     if has_sold(ph): show_menu(chat_id, stage)
     else: send(chat_id, T["gate_first"])
 
+# ───────── каталог Znana в боті ─────────
+# Кнопка розміру — це одразу посилання в кошик із цим артикулом
+# (сайт уміє /checkout?sku=…). Один тап замість «відкрий сайт → знайди →
+# обери колір → обери розмір → поклади в кошик».
+ZNANA_FEED = "https://znanamama.com.ua/feed/google.xml"
+SIZE_ORDER = {"XS": 0, "S": 1, "M": 2, "L": 3, "XL": 4, "2XL": 5, "XXL": 5, "3XL": 6}
+_zn = {"at": 0, "cats": {}}
+
+def znana_items():
+    """Товари Znana з того самого фіда, який читає Google. Беремо лише те, що
+    є на складі: кнопка «купити» на відсутній розмір — найгірше, що можна
+    показати. Фід на сайті перебудовується раз на пів години, тож і копію
+    тримаємо стільки ж."""
+    if _zn["cats"] and time.time() - _zn["at"] < 1800:
+        return _zn["cats"]
+    req = urllib.request.Request(ZNANA_FEED, headers={"User-Agent": "znana-bot"})
+    xml = urllib.request.urlopen(req, timeout=30).read().decode("utf-8", "ignore")
+    groups = {}
+    for raw in re.findall(r"<item>.*?</item>", xml, re.S):
+        def g(tag):
+            m = re.search(r"<%s>(.*?)</%s>" % (tag, tag), raw, re.S)
+            return html.unescape(m.group(1)).strip() if m else ""
+        if g("g:availability") != "in_stock":
+            continue
+        sku, size = g("g:id"), g("g:size")
+        if not sku:
+            continue
+        key = (g("g:item_group_id"), g("g:color"))
+        it = groups.get(key)
+        if not it:
+            # у заголовку фіда назва вже з брендом, кольором і розміром — для
+            # підпису лишаємо тільки саму назву
+            title = g("title").split(", Znana Mama")[0]
+            price = (g("g:sale_price") or g("g:price")).replace(" UAH", "").replace(".00", "")
+            full = g("g:price").replace(" UAH", "").replace(".00", "")
+            it = groups[key] = {"name": title, "colour": g("g:color"), "cat": g("g:product_type"),
+                                "price": price, "old": full if g("g:sale_price") else "",
+                                "link": g("link"), "img": g("g:image_link"), "sizes": []}
+        it["sizes"].append((size, sku))
+    cats = {}
+    for it in groups.values():
+        it["sizes"].sort(key=lambda x: SIZE_ORDER.get(x[0].upper(), 9))
+        cats.setdefault(it["cat"] or "Інше", []).append(it)
+    _zn["cats"], _zn["at"] = cats, time.time()
+    return cats
+
+def znana_menu(chat_id):
+    try:
+        cats = znana_items()
+    except Exception as e:
+        print("znana feed", e)
+        return send(chat_id, "Каталог зараз не вантажиться 😔 Відкрийте сайт:",
+                    [[("Znana Mama", add_utm("https://znanamama.com.ua", "bot-catalog"))]])
+    if not cats:
+        return send(chat_id, "Зараз нічого немає в наявності — зазирніть трохи пізніше 💛")
+    rows = [[(f"{c} · {len(v)}", f"zncat:{c}"[:60])] for c, v in sorted(cats.items(), key=lambda x: -len(x[1]))]
+    return send(chat_id, "🤍 <b>Znana Mama</b> — наш пошив для вагітності й годування.\n"
+                         "Оберіть розділ, а далі тисніть розмір — товар одразу буде в кошику.", rows)
+
+def znana_cat(chat_id, cat):
+    try:
+        items = znana_items().get(cat, [])
+    except Exception as e:
+        print("znana feed", e)
+        items = []
+    if not items:
+        return send(chat_id, "У цьому розділі зараз порожньо. Гляньте інші:", [[("Каталог", "zn")]])
+    for it in items[:6]:
+        price = f"<b>{it['price']} грн</b>" + (f" <s>{it['old']} грн</s>" if it["old"] else "")
+        cap = f"<b>{it['name']}</b>\n{it['colour']}\n{price}\n\nТисніть розмір — і він уже в кошику 👇"
+        buy = [(sz or "Купити", add_utm(f"https://znanamama.com.ua/checkout?sku={urllib.parse.quote(sku)}", "bot-catalog"))
+               for sz, sku in it["sizes"][:8]]
+        rows = [buy[i:i + 4] for i in range(0, len(buy), 4)]
+        rows.append([("Докладніше про модель", add_utm(it["link"], "bot-catalog"))])
+        try:
+            if it["img"]:
+                send_photo_url(chat_id, it["img"], cap, rows)
+            else:
+                send(chat_id, cap, rows)
+        except Exception as e:
+            print("znana card", e)
+    rows = [[("⬅️ Інші розділи", "zn")]]
+    if len(items) > 6:
+        # показали шість — решту дивляться на сайті, інакше бот сипле
+        # двадцятьма фото поспіль
+        rows.insert(0, [(f"Ще {len(items) - 6} у цьому розділі",
+                         add_utm(items[0]["link"].rsplit("/", 1)[0] + "/catalog", "bot-catalog"))])
+    return send(chat_id, "Що далі?", rows)
+
 def on_callback(cb):
     chat_id, data = cb["message"]["chat"]["id"], cb["data"]
     tg("answerCallbackQuery", callback_query_id=cb["id"])
@@ -987,6 +1078,10 @@ def on_callback(cb):
         if kind == "mama":
             send(chat_id, "І щоб підказувати корисне за віком: напишіть дату народження малюка (наприклад 15.03.2026) 😊")
         return
+    if data == "zn":
+        return znana_menu(chat_id)
+    if data.startswith("zncat:"):
+        return znana_cat(chat_id, data[6:])
     if data == "faq":
         row = DB.execute("select coalesce(store,'') from customers where chat_id=?", (chat_id,)).fetchone()
         store = row[0] if row else ""
