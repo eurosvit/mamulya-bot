@@ -61,6 +61,10 @@ try: DB.execute("alter table kpi_cache add column canc_amt real default 0")  # �
 except Exception: pass
 try: DB.execute("alter table kpi_cache add column sold_amt real default 0")  # сума проданих (SOLD) замовлень
 except Exception: pass
+try: DB.execute("alter table kpi_cache add column bot_n int default 0")  # SOLD-замовлень з бота (utmMedium=bot)
+except Exception: pass
+try: DB.execute("alter table kpi_cache add column bot_amt real default 0")  # оборот бота (SOLD, utmMedium=bot)
+except Exception: pass
 DB.execute("create table if not exists recovered(order_id text primary key, ts real, amount real)")  # NOREPLY-повернені (клієнт підтвердив після нуджа)
 try: DB.execute("alter table scheduled add column img text default ''")
 except Exception: pass
@@ -1207,7 +1211,7 @@ def pull_all(sajts, max_pages=80):
             ph = norm_phone((c0.get("phone") or [""])[0] if c0 else "")
             ot = str(o.get("orderTime") or "")[:19]  # повний час для порівняння «перше/повторне»
             if len(ot) >= 7:
-                out.append((ph, ot, int(o.get("statusId") or 0), o.get("campaignId"), float(o.get("paymentAmount") or 0)))
+                out.append((ph, ot, int(o.get("statusId") or 0), o.get("campaignId"), float(o.get("paymentAmount") or 0), (o.get("utmMedium") or "").strip().lower()))
         if len(data) < 100: break
         page += 1; time.sleep(7)
     return out
@@ -1281,15 +1285,15 @@ def kpi_refresh():
             orders = pull_all(sajts)
         except Exception as e:
             print("kpi_pull", store, e); continue
-        M = defaultdict(lambda: {"zay": 0, "canc": 0, "canc_amt": 0.0, "decl": 0, "sold": 0, "sold_amt": 0.0, "returned": 0, "seo_sold": 0, "seo_rev": 0.0})
+        M = defaultdict(lambda: {"zay": 0, "canc": 0, "canc_amt": 0.0, "decl": 0, "sold": 0, "sold_amt": 0.0, "returned": 0, "seo_sold": 0, "seo_rev": 0.0, "bot_n": 0, "bot_amt": 0.0})
         # повторні рахуємо ЛИШЕ по SOLD (реально отримане) — інакше ловимо дублі-заявки
         first = {}
-        for ph, ot, st, camp, amt in orders:
+        for ph, ot, st, camp, amt, utm in orders:
             if ph and st == 5:
                 if ph not in first or ot < first[ph]: first[ph] = ot
         buyers = defaultdict(set); repeat = defaultdict(set)
         seo_buyers = defaultdict(set); seo_new = defaultdict(set)
-        for ph, ot, st, camp, amt in orders:
+        for ph, ot, st, camp, amt, utm in orders:
             ym = ot[:7]
             organic = not camp   # «без реклами» (порожня кампанія) = органіка/прямі = SEO
             if st not in (15, 8):           # чисті заявки (без тесту/видалених)
@@ -1299,6 +1303,8 @@ def kpi_refresh():
                 if st == 5: d["sold"] += 1; d["sold_amt"] += amt
                 if st == 7: d["returned"] += 1   # Повернення — повернули гроші після викупу (менеджер)
             if st == 5:                     # SOLD
+                if utm == "bot":            # замовлення з Telegram-бота (utmMedium=bot) — розсилки + органіка бота
+                    M[ym]["bot_n"] += 1; M[ym]["bot_amt"] += amt
                 if ph:
                     buyers[ym].add(ph)
                     if ot > first[ph]: repeat[ym].add(ph)   # не перша отримана → повторний
@@ -1311,9 +1317,9 @@ def kpi_refresh():
             if ym < "2026-01": continue
             B = buyers.get(ym, set()); R = repeat.get(ym, set())
             sb = seo_buyers.get(ym, set()); sn = seo_new.get(ym, set())
-            DB.execute("insert into kpi_cache(store,ym,zay,canc,decl,sold,updated,ret_num,ret_den,seo_sold,seo_rev,seo_new,seo_den,returned,canc_amt,sold_amt) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
-                       "on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated,ret_num=excluded.ret_num,ret_den=excluded.ret_den,seo_sold=excluded.seo_sold,seo_rev=excluded.seo_rev,seo_new=excluded.seo_new,seo_den=excluded.seo_den,returned=excluded.returned,canc_amt=excluded.canc_amt,sold_amt=excluded.sold_amt",
-                       (store, ym, d["zay"], d["canc"], d["decl"], d["sold"], time.time(), len(R), len(B), d["seo_sold"], round(d["seo_rev"]), len(sn), len(sb), d["returned"], round(d["canc_amt"]), round(d["sold_amt"])))
+            DB.execute("insert into kpi_cache(store,ym,zay,canc,decl,sold,updated,ret_num,ret_den,seo_sold,seo_rev,seo_new,seo_den,returned,canc_amt,sold_amt,bot_n,bot_amt) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                       "on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated,ret_num=excluded.ret_num,ret_den=excluded.ret_den,seo_sold=excluded.seo_sold,seo_rev=excluded.seo_rev,seo_new=excluded.seo_new,seo_den=excluded.seo_den,returned=excluded.returned,canc_amt=excluded.canc_amt,sold_amt=excluded.sold_amt,bot_n=excluded.bot_n,bot_amt=excluded.bot_amt",
+                       (store, ym, d["zay"], d["canc"], d["decl"], d["sold"], time.time(), len(R), len(B), d["seo_sold"], round(d["seo_rev"]), len(sn), len(sb), d["returned"], round(d["canc_amt"]), round(d["sold_amt"]), d["bot_n"], round(d["bot_amt"])))
         DB.commit()
         prop = GA_PROPS.get(store, "")  # Mamulya + AntiAge мають GA4-property (той самий SA)
         if prop:
@@ -2594,6 +2600,16 @@ def posts_page(month=""):
     seg_html = ('<section class="p wide"><h2>🎯 По сегментах <small>відсортовано за конверсією — кому слати вигідніше · у дужках кількість</small></h2>'
         "<table><tr><th>Сегмент</th><th class=n>Розсилок</th><th class=n>Доставлено</th><th class=n>CTR</th><th class=n>Конв.</th><th class=n>Оборот</th><th class=n>Сер.чек</th></tr>"
         f"{seg_rows or '<tr><td>нема даних за період</td></tr>'}</table></section>")
+    bot_rows = ""; bot_tot_n = 0; bot_tot_amt = 0.0
+    for ym, bn, ba in DB.execute("select ym, sum(coalesce(bot_n,0)), sum(coalesce(bot_amt,0)) from kpi_cache group by ym having sum(coalesce(bot_n,0))>0 order by ym desc"):
+        bot_tot_n += bn; bot_tot_amt += ba
+        bot_rows += f"<tr><td>{mlabel(ym)}</td><td class=n>{bn}</td><td class=n>{grn(ba)}</td><td class=n>{grn(ba/bn) if bn else '—'}</td></tr>"
+    bot_html = ('<section class="p wide"><h2>💬 Бот загалом <small>усі магазини · SOLD з міткою бота (utmMedium=bot) · розсилки + органіка · атрибуція last-touch SalesDrive</small></h2>'
+        f'<div class=tiles style=margin-bottom:10px><div class=tile><b>{bot_tot_n}</b><span>Замовлень з бота</span></div>'
+        f'<div class=tile><b>{grn(bot_tot_amt)}</b><span>Оборот бота, грн</span></div>'
+        f'<div class=tile><b>{grn(bot_tot_amt / bot_tot_n) if bot_tot_n else "—"}</b><span>Сер. чек</span></div></div>'
+        "<table><tr><th>Місяць</th><th class=n>Замовлень</th><th class=n>Оборот</th><th class=n>Сер.чек</th></tr>"
+        f"{bot_rows or '<tr><td>ще нема даних — підтягнеться після kpi-refresh (нічний або ручний на вкладці KPI)</td></tr>'}</table></section>")
     cards = [("Розсилок", len(allposts)), ("Доставлено", tot_deliv), ("Кліків", tot_clk), ("CTR", agg_ctr),
              ("Замовлень", tot_ord), ("Конверсія", agg_conv), ("Оборот, грн", grn(tot_rev)),
              ("Сер. чек", avg_check), ("Дохід/розсилку", rev_per), ("🚫 Заблокували", tot_block)]
@@ -2606,6 +2622,7 @@ def posts_page(month=""):
 {filter_form}
 <div class=tiles>{"".join(f'<div class=tile><b>{v}</b><span>{k}</span></div>' for k, v in cards)}</div>
 <div class=grid>
+{bot_html}
 {mom_html}
 {seg_html}
 <section class="p wide"><h2>Надіслані розсилки <small>останні 50 · замовлення/оборот — отримувачі протягом 7 днів після</small></h2>
