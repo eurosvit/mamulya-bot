@@ -2374,31 +2374,42 @@ LVL_LABEL = {"lvl:diamond": "💎 Діамант (≥25 000)", "lvl:vip": "👑 
              "lvl:basic": "💙 Базовий (4.5–9k)", "lvl:none": "— ще без рівня (<4.5k)"}
 
 def seglist_page(seg):
-    # список клієнтів будь-якого сегмента: імʼя (→картка), телефон, сума покупок, рівень. Для рівнів бази й усіх інших сегментів.
+    # список клієнтів сегмента. Рівні (lvl:) — усі покупці рівня по телефону (= число в блоці «Рівні бази»),
+    # з позначкою «у боті» (кому реально можна слати). Інші сегменти — підписники бота (resolve_ids).
     AK = os.environ.get("ADMIN_KEY", "")
-    ids = resolve_ids(seg)
-    sums = dict(DB.execute("select phone, sum(amount) from orders where phone!='' and status not in (6,7,13,15,8) group by phone"))
     nm_ph = dict(DB.execute("select phone, name from names where coalesce(name,'')!=''"))
     nm_cid = dict(DB.execute("select chat_id, name from legacy where coalesce(name,'')!=''"))
-    recs = []
-    for cid in ids:
-        ph = (DB.execute("select coalesce(phone,'') from customers where chat_id=?", (cid,)).fetchone() or [""])[0]
-        nm = nm_ph.get(ph) or nm_cid.get(cid) or "—"
-        recs.append((cid, nm, ph, sums.get(ph, 0)))
+    cid_by_phone = {}
+    for ph, cid in DB.execute("select coalesce(phone,''), chat_id from customers where coalesce(phone,'')!=''"):
+        cid_by_phone.setdefault(ph, cid)
+    recs = []  # (cid|None, name, phone, sum)
+    if seg.startswith("lvl:"):
+        want = {"diamond": "Діамант", "vip": "VIP", "smart": "Смарт", "basic": "Базовий", "none": "—"}.get(seg[4:])
+        for ph, total, name, *_ in base_levels():
+            if name != want: continue
+            cid = cid_by_phone.get(ph)
+            recs.append((cid, nm_ph.get(ph) or (nm_cid.get(cid) if cid else "") or "—", ph, total))
+    else:
+        sums = dict(DB.execute("select phone, sum(amount) from orders where phone!='' and status not in (6,7,13,15,8) group by phone"))
+        for cid in resolve_ids(seg):
+            ph = (DB.execute("select coalesce(phone,'') from customers where chat_id=?", (cid,)).fetchone() or [""])[0]
+            recs.append((cid, nm_ph.get(ph) or nm_cid.get(cid) or "—", ph, sums.get(ph, 0)))
     recs.sort(key=lambda r: -r[3])
-    total = len(recs)
-    shown = recs[:400]
-    body = "".join(f"<tr><td><a href='/client?key={AK}&id={r[0]}'>{r[1]}</a></td><td>{r[2] or '—'}</td><td class=n>{r[3]:,.0f} грн</td></tr>".replace(",", " ") for r in shown)
+    total = len(recs); in_bot = sum(1 for r in recs if r[0])
+    body = "".join(
+        (f"<tr><td>{'<a href=/client?key='+AK+'&id='+str(r[0])+'>'+r[1]+'</a>' if r[0] else r[1]}</td>"
+         f"<td>{r[2] or '—'}</td><td class=n>{r[3]:,.0f} грн</td>"
+         f"<td class=n>{'🤖' if r[0] else '—'}</td></tr>").replace(",", " ") for r in recs[:400])
     more = f"<p style=color:var(--ink3);font-size:12.5px>Показано 400 з {total}. Повний список — <a href='/segments.csv?key={AK}'>CSV ↓</a></p>" if total > 400 else ""
     label = LVL_LABEL.get(seg, seg)
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Сегмент — {label}</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
 {CAB_CSS}
-<div class=top><h1>👥 {label}</h1><span class=upd>{total} клієнтів</span><span class=upd style=margin-left:auto><a href="/admin?key={AK}">← до кабінету</a></span></div>
+<div class=top><h1>👥 {label}</h1><span class=upd>{total} клієнтів · 🤖 {in_bot} у боті</span><span class=upd style=margin-left:auto><a href="/admin?key={AK}">← до кабінету</a></span></div>
 <div class=grid><section class="p wide">
-<p style=color:var(--ink2);font-size:12.5px;margin:0 0 8px>Сегмент для розсилки: <code>{seg}</code> — можна слати через <code>/schedule ДД.ММ ГГ:ХХ {seg} текст</code></p>
-<table><tr><th>Клієнт</th><th>Телефон</th><th class=n>Сума покупок</th></tr>{body or '<tr><td>порожньо</td></tr>'}</table>
+<p style=color:var(--ink2);font-size:12.5px;margin:0 0 8px>🤖 = є в боті, кому реально можна слати (<b>{in_bot}</b> з {total}). Розсилка: <code>/schedule ДД.ММ ГГ:ХХ {seg} текст</code> — піде лише цим {in_bot}.</p>
+<table><tr><th>Клієнт</th><th>Телефон</th><th class=n>Сума покупок</th><th class=n>Бот</th></tr>{body or '<tr><td>порожньо</td></tr>'}</table>
 {more}</section></div></html>"""
 
 def client_page(cid):
