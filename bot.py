@@ -653,6 +653,12 @@ def resolve_ids(seg):
             or exists(select 1 from orders o where o.phone=c.phone and {SOLD_F}
                 and (lower(o.items) like '%lipoland%' or o.items like '%іполенд%' or o.items like '%омана%'))""").fetchall()
         return [r[0] for r in rows]
+    if seg.startswith("lvl:"):   # рівень лояльності (виключна смуга за сумою покупок) — як у блоці «Рівні бази»
+        lo, hi = {"diamond": (25000, 1e12), "vip": (15000, 25000), "smart": (9000, 15000),
+                  "basic": (4500, 9000), "none": (0.01, 4500)}.get(seg[4:], (None, None))
+        if lo is None: return []
+        sums = dict(DB.execute("select phone, sum(amount) from orders where phone!='' and status not in (6,7,13,15,8) group by phone"))
+        return [cid for cid, ph in DB.execute("select chat_id, coalesce(phone,'') from customers where coalesce(phone,'')!=''") if lo <= sums.get(ph, 0) < hi]
     if seg == "nobuy":
         sql = f"c.phone='' or not exists(select 1 from orders o where o.phone=c.phone and {SOLD_F})"
     elif seg == "vip":
@@ -2341,6 +2347,9 @@ class Hook(BaseHTTPRequestHandler):
             cid = int(qs.get("id", ["0"])[0])
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
             self.wfile.write(client_page(cid).encode()); return
+        if u.path == "/seglist" and authed:
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
+            self.wfile.write(seglist_page(qs.get("seg", [""])[0]).encode()); return
         if u.path != "/admin" or not authed:
             self.send_response(200); self.end_headers(); self.wfile.write(b"ok"); return
         self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
@@ -2360,6 +2369,37 @@ def base_levels():
         nxt = ([l for l in reversed(LVL) if total < l[0]] or [None])[0]
         out.append((ph, total, cur[2], cur[1], nxt[2] if nxt else "", nxt[0] - total if nxt else 0))
     return out
+
+LVL_LABEL = {"lvl:diamond": "💎 Діамант (≥25 000)", "lvl:vip": "👑 VIP (15–25k)", "lvl:smart": "🧠 Смарт (9–15k)",
+             "lvl:basic": "💙 Базовий (4.5–9k)", "lvl:none": "— ще без рівня (<4.5k)"}
+
+def seglist_page(seg):
+    # список клієнтів будь-якого сегмента: імʼя (→картка), телефон, сума покупок, рівень. Для рівнів бази й усіх інших сегментів.
+    AK = os.environ.get("ADMIN_KEY", "")
+    ids = resolve_ids(seg)
+    sums = dict(DB.execute("select phone, sum(amount) from orders where phone!='' and status not in (6,7,13,15,8) group by phone"))
+    nm_ph = dict(DB.execute("select phone, name from names where coalesce(name,'')!=''"))
+    nm_cid = dict(DB.execute("select chat_id, name from legacy where coalesce(name,'')!=''"))
+    recs = []
+    for cid in ids:
+        ph = (DB.execute("select coalesce(phone,'') from customers where chat_id=?", (cid,)).fetchone() or [""])[0]
+        nm = nm_ph.get(ph) or nm_cid.get(cid) or "—"
+        recs.append((cid, nm, ph, sums.get(ph, 0)))
+    recs.sort(key=lambda r: -r[3])
+    total = len(recs)
+    shown = recs[:400]
+    body = "".join(f"<tr><td><a href='/client?key={AK}&id={r[0]}'>{r[1]}</a></td><td>{r[2] or '—'}</td><td class=n>{r[3]:,.0f} грн</td></tr>".replace(",", " ") for r in shown)
+    more = f"<p style=color:var(--ink3);font-size:12.5px>Показано 400 з {total}. Повний список — <a href='/segments.csv?key={AK}'>CSV ↓</a></p>" if total > 400 else ""
+    label = LVL_LABEL.get(seg, seg)
+    return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Сегмент — {label}</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
+{CAB_CSS}
+<div class=top><h1>👥 {label}</h1><span class=upd>{total} клієнтів</span><span class=upd style=margin-left:auto><a href="/admin?key={AK}">← до кабінету</a></span></div>
+<div class=grid><section class="p wide">
+<p style=color:var(--ink2);font-size:12.5px;margin:0 0 8px>Сегмент для розсилки: <code>{seg}</code> — можна слати через <code>/schedule ДД.ММ ГГ:ХХ {seg} текст</code></p>
+<table><tr><th>Клієнт</th><th>Телефон</th><th class=n>Сума покупок</th></tr>{body or '<tr><td>порожньо</td></tr>'}</table>
+{more}</section></div></html>"""
 
 def client_page(cid):
     c = DB.execute("select phone,stage,dob,created,coalesce(store,''),order_id from customers where chat_id=?", (cid,)).fetchone()
@@ -2989,7 +3029,13 @@ def admin_page():
 <tr><td>🎟 −150 (натискань)</td><td class=n>{n("select count(*) from gifts where gift='mam150'")}</td><td></td></tr>"""
     coup_list = "".join(f"<tr><td><code>{c}</code></td><td>{who}</td><td class=n>{exp[:10]}</td><td>{'🟢' if live else '⚪'}{' 🔔' if rem else ''}</td></tr>" for c, who, exp, live, rem in cpn)
 
-    lvl_rows = rows([(nm, lvl_counts.get(nm, 0)) for nm in ["Діамант", "VIP", "Смарт", "Базовий", "—"]], pct_of=len(base) or 1)
+    LVL_SEG = {"Діамант": "diamond", "VIP": "vip", "Смарт": "smart", "Базовий": "basic", "—": "none"}
+    _lvo = ["Діамант", "VIP", "Смарт", "Базовий", "—"]
+    _lvmx = max((lvl_counts.get(nm, 0) for nm in _lvo), default=1) or 1; _lvtot = len(base) or 1
+    lvl_rows = "".join(
+        f"<tr><td><a href='/seglist?key={AK}&seg=lvl:{LVL_SEG[nm]}'>{nm}</a></td><td class=n>{lvl_counts.get(nm,0)}</td>"
+        f"<td class=n>{lvl_counts.get(nm,0)/_lvtot*100:.0f}%</td>"
+        f"<td class=b><i style=width:{int(lvl_counts.get(nm,0)/_lvmx*100)}%></i></td></tr>" for nm in _lvo)
     near_rows = "".join(f"<tr><td>{b[0]}</td><td>{getname(b[0])}</td><td class=n>{b[1]:,.0f} грн</td><td class=n>{b[5]:,.0f} грн до «{b[4]}»</td></tr>".replace(",", " ") for b in near)
     def _disc(total):
         cur = next(((t, p, n) for t, p, n in LVL if total >= t), None)
