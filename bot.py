@@ -2228,10 +2228,11 @@ class Hook(BaseHTTPRequestHandler):
             self.send_response(200); self.end_headers(); self.wfile.write(f"preview sent to {sent} admins".encode()); return
         if u.path == "/segments.csv" and authed:
             self.send_response(200); self.send_header("Content-Type", "text/csv; charset=utf-8"); self.end_headers()
-            rows = ["phone;name;total;level;discount;next_level;to_next"]
+            in_bot = {ph for (ph,) in DB.execute("select distinct coalesce(phone,'') from customers where coalesce(phone,'')!=''")}
+            rows = ["phone;name;total;level;discount;next_level;to_next;in_bot"]
             for ph, total, lvl, pc, nx, need in base_levels():
                 nm = (DB.execute("select name from names where phone=?", (ph,)).fetchone() or [""])[0]
-                rows.append(f"{ph};{nm};{total:.0f};{lvl};{pc};{nx};{need:.0f}")
+                rows.append(f"{ph};{nm};{total:.0f};{lvl};{pc};{nx};{need:.0f};{1 if ph in in_bot else 0}")
             self.wfile.write("\n".join(rows).encode()); return
         if u.path == "/b2b" and authed:
             ph = qs.get("phone", [""])[0]
