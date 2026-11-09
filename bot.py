@@ -839,6 +839,13 @@ def on_text(chat_id, text):
             if c["fail_count"]: tail += f" · провалів: {c['fail_count']}"
             lines.append(f"{mark} {name}{tail}")
         log = st["log"][-10:]
+        try:
+            h = json.loads(urllib.request.urlopen(urllib.request.Request(
+                "https://znana-stock.onrender.com/api/health", headers={"User-Agent": "znana-watchdog"}), timeout=15).read())
+            lines.append("")
+            lines.append(f"Памʼять складу: <b>{h.get('memMb','?')} МБ</b> · аптайм {h.get('upMin','?')} хв")
+        except Exception:
+            pass
         lines.append("")
         lines.append("<b>Останні провали:</b>")
         lines += [f"{time.strftime('%d.%m %H:%M', time.localtime(x[0]))} · {x[1]} · {x[2]}" for x in reversed(log)] or ["жодного від старту бота"]
@@ -3123,10 +3130,20 @@ WATCH = [
     ("Свіжість довідника", "https://znana-stock.onrender.com/api/np/status",                  lambda t: np_fresh(t)),
     ("Склад (фід)",        "https://znana-stock.onrender.com/export/rozetka.xml",            lambda t: "<offer" in t),
     ("Підрахунок кошика",  "https://znana-stock.onrender.com/api/health",                    lambda t: '"ok":true' in t.replace(" ", "")),
+    # Render вбиває інстанс за перевищення памʼяті, і чекаут на секунди зникає.
+    # Хочемо знати ДО того: 400 МБ — це вже близько до межі найменшого плану.
+    ("Памʼять складу",     "https://znana-stock.onrender.com/api/health",                    lambda t: mem_ok(t)),
     # сторінка може відкритись, а скрипти не завантажитись — тоді нічого не
     # натискається, хоча «сайт працює». Тягнемо перший чанк із самої сторінки.
     ("Скрипти сайту",      "https://znanamama.com.ua/checkout",                             lambda t: chunk_ok(t)),
 ]
+
+def mem_ok(body, limit=400):
+    try:
+        mb = int(json.loads(body).get("memMb") or 0)
+    except Exception:
+        return True            # поле зʼявилось не скрізь — не кричимо даремно
+    return mb < limit
 
 def np_fresh(body):
     """Копія довідника оновлюється раз на добу. Порожня або старша за три дні —
