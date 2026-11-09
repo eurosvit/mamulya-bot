@@ -3030,7 +3030,7 @@ def admin_page():
             out += f"<tr><td>{label}</td><td class=n>{v}</td><td class=n>{v/tot*100:.0f}%</td><td class=b><i style=width:{int(v/mx*100)}%></i></td></tr>"
         return out
 
-    SRC_UA = {"sms": "SMS", "qr": "QR з пакування", "web": "сайт", "migrate": "міграція", "direct": "самі знайшли", "promo": "попап −7%", "—": "—"}
+    SRC_UA = {"sms": "SMS", "qr": "QR з пакування", "web": "сайт", "migrate": "міграція", "direct": "самі знайшли", "promo": "попап −7%", "loyal": "SMS лояльність", "—": "—"}
     fun = f"""<tr><td>Замовлень з 10.09</td><td class=n>{orders_since}</td><td></td></tr>
 <tr><td><b>Перейшли в бот</b></td><td class=n><b>{entered}</b></td><td class=n><b>{conv}</b></td></tr>"""
     for st in sorted(set(bso) | set(bse), key=lambda x: -bso.get(x, 0)):
