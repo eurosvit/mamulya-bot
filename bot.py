@@ -2100,7 +2100,9 @@ class Hook(BaseHTTPRequestHandler):
                 ok, total = run_broadcast(seg or None, body, btn, img or None, excl)
                 DB.execute("update scheduled set done=1, sent=?, total=? where id=?", (ok, total, _id)); DB.commit()
                 msg = f"sent {ok}/{total} ({seg or 'всі'})"
-            self.send_response(200); self.end_headers(); self.wfile.write(msg.encode()); return
+            if qs.get("raw", [""])[0] == "1":
+                self.send_response(200); self.end_headers(); self.wfile.write(msg.encode()); return
+            self.send_response(302); self.send_header("Location", f"/admin?key={os.environ.get('ADMIN_KEY','')}"); self.end_headers(); return
         if u.path == "/confirm":  # публічний: сторінка підтвердження замовлення (NOREPLY-нудж)
             oid = qs.get("order", [""])[0]; do = qs.get("do", [""])[0]; reason = qs.get("r", [""])[0]
             test = qs.get("test", [""])[0] == "1"; token = qs.get("t", [""])[0]
@@ -2566,7 +2568,9 @@ def posts_page(month=""):
         else:
             eff = len([c for c in resolve_ids((seg or '').lower()) if not nex or not DB.execute('select 1 from sched_excl where sid=? and chat_id=?', (sid, c)).fetchone()])
             st = f"⏳ очікує · <b>{eff}</b> отримувачів" + (f" <span style=color:#B8325A>(−{nex} вручну)</span>" if nex else "")
-            who = f"<a href='/sched?key={AK}&id={sid}'>👁 кому піде</a>"
+            who = (f"<a href='/sched?key={AK}&id={sid}'>👁 кому піде</a> · "
+                   f"<a href='/schednow?key={AK}&id={sid}' onclick=\"return confirm('Відправити розсилку #{sid} зараз ({eff} отримувачів)?')\" "
+                   f"style=color:#2E8B57;font-weight:600>▶️ зараз</a>")
         sched_rows += f"<tr><td>#{sid}</td><td>{when}</td><td>{SEG_UA.get(seg, seg or 'усі')}</td><td>{st}</td><td>{who}</td><td style=max-width:420px;white-space:pre-wrap;color:#6E5F65;font-size:12.5px>{body or ''}" + ("  🔘" if btn else "") + ("  🖼" if img else "") + "</td></tr>"
     # 🌿 трекінг спіруліни + 🔥 апгрейд знижки
     sp_open = n("select count(*) from spir_ev where kind='open'")
