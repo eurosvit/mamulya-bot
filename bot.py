@@ -2102,7 +2102,7 @@ class Hook(BaseHTTPRequestHandler):
                 msg = f"sent {ok}/{total} ({seg or 'всі'})"
             if qs.get("raw", [""])[0] == "1":
                 self.send_response(200); self.end_headers(); self.wfile.write(msg.encode()); return
-            self.send_response(302); self.send_header("Location", f"/admin?key={os.environ.get('ADMIN_KEY','')}"); self.end_headers(); return
+            self.send_response(302); self.send_header("Location", f"/posts?key={os.environ.get('ADMIN_KEY','')}"); self.end_headers(); return
         if u.path == "/confirm":  # публічний: сторінка підтвердження замовлення (NOREPLY-нудж)
             oid = qs.get("order", [""])[0]; do = qs.get("do", [""])[0]; reason = qs.get("r", [""])[0]
             test = qs.get("test", [""])[0] == "1"; token = qs.get("t", [""])[0]
