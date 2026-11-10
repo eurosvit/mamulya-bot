@@ -2088,6 +2088,19 @@ class Hook(BaseHTTPRequestHandler):
             except Exception as e:
                 msg = f"error: {e}"
             self.send_response(200); self.end_headers(); self.wfile.write(msg.encode()); return
+        if u.path == "/schednow" and authed:  # миттєво відправити заплановану розсилку (не чекати годинного тіку)
+            sid = qs.get("id", [""])[0]
+            row = DB.execute("select id,seg,body,btn,coalesce(img,'') from scheduled where id=? and done=0", (sid,)).fetchone()
+            if not row:
+                msg = "not found or already sent"
+            else:
+                _id, seg, body, btn_s, img = row
+                btn = tuple(btn_s.split("|", 1)) if btn_s else None
+                excl = {r[0] for r in DB.execute("select chat_id from sched_excl where sid=?", (_id,))}
+                ok, total = run_broadcast(seg or None, body, btn, img or None, excl)
+                DB.execute("update scheduled set done=1, sent=?, total=? where id=?", (ok, total, _id)); DB.commit()
+                msg = f"sent {ok}/{total} ({seg or 'всі'})"
+            self.send_response(200); self.end_headers(); self.wfile.write(msg.encode()); return
         if u.path == "/confirm":  # публічний: сторінка підтвердження замовлення (NOREPLY-нудж)
             oid = qs.get("order", [""])[0]; do = qs.get("do", [""])[0]; reason = qs.get("r", [""])[0]
             test = qs.get("test", [""])[0] == "1"; token = qs.get("t", [""])[0]
