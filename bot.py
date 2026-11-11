@@ -65,6 +65,10 @@ try: DB.execute("alter table kpi_cache add column bot_n int default 0")  # SOLD-
 except Exception: pass
 try: DB.execute("alter table kpi_cache add column bot_amt real default 0")  # оборот бота (SOLD, utmMedium=bot)
 except Exception: pass
+try: DB.execute("alter table kpi_cache add column sd_n int default 0")  # SOLD за ДАТОЮ ПРОДАЖУ (paymentDate) — реальна виручка місяця
+except Exception: pass
+try: DB.execute("alter table kpi_cache add column sd_amt real default 0")  # сума SOLD за датою продажу (paymentDate)
+except Exception: pass
 DB.execute("create table if not exists recovered(order_id text primary key, ts real, amount real)")  # NOREPLY-повернені (клієнт підтвердив після нуджа)
 try: DB.execute("alter table scheduled add column img text default ''")
 except Exception: pass
@@ -1224,7 +1228,8 @@ def pull_all(sajts, max_pages=80):
             ph = norm_phone((c0.get("phone") or [""])[0] if c0 else "")
             ot = str(o.get("orderTime") or "")[:19]  # повний час для порівняння «перше/повторне»
             if len(ot) >= 7:
-                out.append((ph, ot, int(o.get("statusId") or 0), o.get("campaignId"), float(o.get("paymentAmount") or 0), (o.get("utmMedium") or "").strip().lower()))
+                pd = str(o.get("paymentDate") or "")[:7]  # дата продажу (міс) — для виручки за датою продажу
+                out.append((ph, ot, int(o.get("statusId") or 0), o.get("campaignId"), float(o.get("paymentAmount") or 0), (o.get("utmMedium") or "").strip().lower(), pd))
         if len(data) < 100: break
         page += 1; time.sleep(7)
     return out
@@ -1289,6 +1294,22 @@ GA_PROPS = {s: p for s, p in (("Mamulya", os.environ.get("GA_PROPERTY", "")),
                               ("AntiAge", os.environ.get("GA_PROPERTY_ANTIAGE", "286530447")),
                               ("Modnamama", os.environ.get("GA_PROPERTY_MODNAMAMA", "395530781"))) if p}
 
+def recent_months(n):
+    # ['2026-11','2026-10',...] — n останніх місяців від поточного (localtime)
+    y, m = time.localtime().tm_year, time.localtime().tm_mon
+    out = []
+    for _ in range(n):
+        out.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0: m = 12; y -= 1
+    return out
+
+def month_bounds(ym):
+    # ('YYYY-MM-01','YYYY-MM-last') для фільтра paymentDate
+    import calendar
+    y, m = map(int, ym.split("-"))
+    return f"{ym}-01", f"{ym}-{calendar.monthrange(y, m)[1]:02d}"
+
 def kpi_refresh():
     # один прохід по магазину (вкладаємось у 100 запитів/год SalesDrive): усе рахуємо локально
     if not os.environ.get("SALESDRIVE_KEY"): return
@@ -1301,12 +1322,14 @@ def kpi_refresh():
         M = defaultdict(lambda: {"zay": 0, "canc": 0, "canc_amt": 0.0, "decl": 0, "sold": 0, "sold_amt": 0.0, "returned": 0, "seo_sold": 0, "seo_rev": 0.0, "bot_n": 0, "bot_amt": 0.0})
         # повторні рахуємо ЛИШЕ по SOLD (реально отримане) — інакше ловимо дублі-заявки
         first = {}
-        for ph, ot, st, camp, amt, utm in orders:
+        for ph, ot, st, camp, amt, utm, pd in orders:
             if ph and st == 5:
                 if ph not in first or ot < first[ph]: first[ph] = ot
         buyers = defaultdict(set); repeat = defaultdict(set)
         seo_buyers = defaultdict(set); seo_new = defaultdict(set)
-        for ph, ot, st, camp, amt, utm in orders:
+        SD = defaultdict(lambda: [0, 0.0])   # SOLD за ДАТОЮ ПРОДАЖУ (paymentDate) — реальна виручка місяця
+        for ph, ot, st, camp, amt, utm, pd in orders:
+            if st == 5 and pd: SD[pd][0] += 1; SD[pd][1] += amt
             ym = ot[:7]
             organic = not camp   # «без реклами» (порожня кампанія) = органіка/прямі = SEO
             if st not in (15, 8):           # чисті заявки (без тесту/видалених)
@@ -1333,12 +1356,27 @@ def kpi_refresh():
             DB.execute("insert into kpi_cache(store,ym,zay,canc,decl,sold,updated,ret_num,ret_den,seo_sold,seo_rev,seo_new,seo_den,returned,canc_amt,sold_amt,bot_n,bot_amt) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                        "on conflict(store,ym) do update set zay=excluded.zay,canc=excluded.canc,decl=excluded.decl,sold=excluded.sold,updated=excluded.updated,ret_num=excluded.ret_num,ret_den=excluded.ret_den,seo_sold=excluded.seo_sold,seo_rev=excluded.seo_rev,seo_new=excluded.seo_new,seo_den=excluded.seo_den,returned=excluded.returned,canc_amt=excluded.canc_amt,sold_amt=excluded.sold_amt,bot_n=excluded.bot_n,bot_amt=excluded.bot_amt",
                        (store, ym, d["zay"], d["canc"], d["decl"], d["sold"], time.time(), len(R), len(B), d["seo_sold"], round(d["seo_rev"]), len(sn), len(sb), d["returned"], round(d["canc_amt"]), round(d["sold_amt"]), d["bot_n"], round(d["bot_amt"])))
+        for ym, (n, s) in SD.items():   # виручка за датою продажу (paymentDate) для цього магазину
+            if ym < "2026-01": continue
+            DB.execute("insert into kpi_cache(store,ym,sd_n,sd_amt,updated) values(?,?,?,?,?) "
+                       "on conflict(store,ym) do update set sd_n=excluded.sd_n, sd_amt=excluded.sd_amt",
+                       (store, ym, n, round(s), time.time()))
         DB.commit()
         prop = GA_PROPS.get(store, "")  # Mamulya + AntiAge мають GA4-property (той самий SA)
         if prop:
             for ym, s in ga_sessions(prop).items():
                 if ym >= "2026-01": DB.execute("update kpi_cache set seo_sess=? where store=? and ym=?", (s, store, ym))
             DB.commit()
+    # «Усі магазини» за датою продажу — прямий запит без фільтра sajt (= те, що видно в CRM), останні 4 міс
+    for ym in recent_months(4):
+        try:
+            a, b = month_bounds(ym)
+            t = sd_get(f"?limit=1&filter[statusId][]=5&filter[paymentDate][from]={a}&filter[paymentDate][to]={b}").get("totals") or {}
+            DB.execute("insert into kpi_cache(store,ym,sd_n,sd_amt,updated) values('ALL',?,?,?,?) "
+                       "on conflict(store,ym) do update set sd_n=excluded.sd_n, sd_amt=excluded.sd_amt",
+                       (ym, int(t.get("count") or 0), round(float(t.get("paymentAmount") or 0)), time.time()))
+            DB.commit(); time.sleep(7)
+        except Exception as e: print("all_sd", ym, e)
     print("kpi_refresh done")
 
 def sync_orders(pages, limit=50):
@@ -2888,6 +2926,21 @@ def kpi_page(store=None):
                    f'<div class=tile><b>{money(ta)} грн</b><span>Сума повернених</span></div>'
                    f'<div class=tile><b style=color:#A86A1F>{waiting}</b><span>Зараз у NOREPLY</span></div></div>'
                    f'{tbody}</section>')
+    # 💰 Виручка за ДАТОЮ ПРОДАЖУ (paymentDate) — реальні продажі місяця (окремо від таблиці за датою заявки)
+    sd_store = {ym: (n, a) for ym, n, a in DB.execute("select ym,coalesce(sd_n,0),coalesce(sd_amt,0) from kpi_cache where store=?", (STORE,))}
+    sd_all = {ym: (n, a) for ym, n, a in DB.execute("select ym,coalesce(sd_n,0),coalesce(sd_amt,0) from kpi_cache where store='ALL'")}
+    sd_yms = [ym for ym in sorted(set(sd_store) | set(sd_all), reverse=True) if (sd_store.get(ym, (0, 0))[0] or sd_all.get(ym, (0, 0))[0])][:6]
+    sd_html = ""
+    if sd_yms:
+        srows = ""
+        for ym in sd_yms:
+            y, mm = ym.split("-"); nm = f"{UA_MON[int(mm)]} {y}"
+            sn, sa = sd_store.get(ym, (0, 0)); an, aa = sd_all.get(ym, (0, 0))
+            srows += (f"<tr><td>{nm}</td><td class=n>{sn}</td><td class=n style=color:#2E8B57>{money(sa)} грн</td>"
+                      f"<td class=n>{an}</td><td class=n style=color:#2E8B57>{money(aa)} грн</td></tr>")
+        sd_html = (f'<section class="p wide"><h2>💰 Виручка за датою продажу <small>SOLD · paymentDate · реальні продажі місяця</small></h2>'
+                   f'<table><tr><th>Місяць</th><th class=n>{STORE} шт</th><th class=n>{STORE} сума</th><th class=n>Усі магазини шт</th><th class=n>Усі магазини сума</th></tr>{srows}</table>'
+                   f'<p style=color:#6E5F65;font-size:12.5px;margin-top:8px>Рахується за <b>датою продажу</b> (коли виставлено SOLD) — збігається з фільтром «дата продажу» у SalesDrive. Таблиця «KPI по місяцях» нижче — за <b>датою заявки</b> (для конверсії й скасувань). «Усі магазини» = весь SalesDrive, разом із маркетплейсами (Rozetka/Etsy).</p></section>')
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>KPI — {STORE}</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
@@ -2897,6 +2950,7 @@ def kpi_page(store=None):
 {_nav("KPI", AK)}
 <div class=nav style=margin-top:-6px>{sw}</div>
 <div class=grid>
+{sd_html}
 {nr_html}
 <section class="p wide"><h2>KPI по місяцях <small>{STORE} · джерело SalesDrive · % і кількість у дужках</small></h2>
 <table id=kt><tr><th>Місяць</th><th>Заявки</th><th>Скасовано ≤18%</th><th>Сума скасов.</th><th>Відмова</th><th>Продано</th><th>Сума продано</th><th>Повернення</th><th>Повторні ≥15%</th></tr>{out or ('<tr><td>ще не завантажено — тисни «Оновити з SalesDrive»</td></tr>' if empty else '')}</table>
