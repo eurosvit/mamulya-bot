@@ -2536,7 +2536,7 @@ def bfpoll_page():
     cnt = {o: n for o, n in DB.execute("select option, count(*) from poll_votes where poll=? group by option", (BF_POLL,))}
     total = sum(cnt.values())
     mx = max(cnt.values(), default=1) or 1
-    order = ["discount", "delivery", "cert", "own"]
+    order = ["discount", "delivery", "cert", "gift", "own"]
     bars = "".join(
         f"<tr><td><a href='/seglist?key={AK}&seg=poll:{k}'>{BF_OPTS[k]}</a></td><td class=n>{cnt.get(k,0)}</td>"
         f"<td class=n>{(cnt.get(k,0)/total*100 if total else 0):.0f}%</td>"
