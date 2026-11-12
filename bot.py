@@ -1092,12 +1092,14 @@ def znana_cat(chat_id, cat):
 
 BF_POLL = "bf2026"
 BF_OPTS = {"discount": "💰 Знижка на товари", "delivery": "🚚 Безкоштовна доставка",
-           "cert": "🎁 Подарунковий сертифікат", "own": "✍️ Свій варіант"}
+           "cert": "🎟 Подарунковий сертифікат", "gift": "🎁 Секретний подарунок (500–1000 грн)",
+           "own": "✍️ Свій варіант"}
 BF_MSG = ("🖤 <b>Чорна пʼятниця вже близько!</b>\n\n"
-          "Кожному, хто відповість, на ЧП — <b>секретний подарунок на суму від 500 до 1000 грн</b> до замовлення 🎁\n\n"
-          "Хочемо зробити акцію корисною саме для вас. Що було б найкращим? Тисніть кнопку 👇")
-BF_THANKS = ("🖤 Готово, ви в грі! На Чорну пʼятницю — ваш <b>секретний подарунок на 500–1000 грн</b> до замовлення, "
-             "а бонус зробимо саме під ваш вибір 💗 Чекайте від нас звістку на ЧП!")
+          "Хочемо зробити акцію корисною саме для вас. Що було б для вас найкращим подарунком? Тисніть кнопку 👇")
+BF_THANKS = ("🖤 Готово, ви в грі! На Чорну пʼятницю зробимо вам пропозицію саме під ваш вибір 💗 "
+             "Чекайте від нас звістку на ЧП!")
+BF_THANKS_GIFT = ("🎁 Чудовий вибір! На Чорну пʼятницю — <b>секретний подарунок на суму від 500 до 1000 грн</b> "
+                  "до замовлення від 1500 грн 💗 Чекайте від нас звістку на ЧП!")
 
 def bf_poll_send(seg):
     # розсилка опитування (callback-кнопки); пропускаємо тих, хто вже відповів — безпечно запускати повторно
@@ -1122,7 +1124,7 @@ def on_callback(cb):
         DB.execute("insert into poll_votes(chat_id,poll,option,ts) values(?,?,?,?) "
                    "on conflict(chat_id,poll) do update set option=excluded.option, ts=excluded.ts",
                    (chat_id, BF_POLL, opt, time.time())); DB.commit()
-        send(chat_id, BF_THANKS)
+        send(chat_id, BF_THANKS_GIFT if opt == "gift" else BF_THANKS)
         if opt in ("discount", "own"):
             DB.execute("insert into poll_wait(chat_id,poll,ts) values(?,?,?) "
                        "on conflict(chat_id) do update set poll=excluded.poll, ts=excluded.ts",
