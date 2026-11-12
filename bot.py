@@ -1121,10 +1121,17 @@ def on_callback(cb):
     if data.startswith("bf:"):
         opt = data[3:]
         if opt not in BF_OPTS: return
+        prev = DB.execute("select option from poll_votes where chat_id=? and poll=?", (chat_id, BF_POLL)).fetchone()
+        if prev and prev[0] == opt:   # повторний клік по тому ж — без спаму
+            return send(chat_id, "Ваш вибір уже зафіксовано ✅ На ЧП надішлемо саме його 💗")
         DB.execute("insert into poll_votes(chat_id,poll,option,ts) values(?,?,?,?) "
                    "on conflict(chat_id,poll) do update set option=excluded.option, ts=excluded.ts",
-                   (chat_id, BF_POLL, opt, time.time())); DB.commit()
-        send(chat_id, BF_THANKS_GIFT if opt == "gift" else BF_THANKS)
+                   (chat_id, BF_POLL, opt, time.time()))
+        DB.execute("delete from poll_wait where chat_id=?", (chat_id,))   # прибираємо застряглий запит тексту при зміні вибору
+        DB.commit()
+        thanks = BF_THANKS_GIFT if opt == "gift" else BF_THANKS
+        if prev: thanks = "🔄 Оновили ваш вибір — рахується лише останній.\n\n" + thanks
+        send(chat_id, thanks)
         if opt in ("discount", "own"):
             DB.execute("insert into poll_wait(chat_id,poll,ts) values(?,?,?) "
                        "on conflict(chat_id) do update set poll=excluded.poll, ts=excluded.ts",
