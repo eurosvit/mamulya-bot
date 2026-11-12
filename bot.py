@@ -70,6 +70,8 @@ except Exception: pass
 try: DB.execute("alter table kpi_cache add column sd_amt real default 0")  # сума SOLD за датою продажу (paymentDate)
 except Exception: pass
 DB.execute("create table if not exists recovered(order_id text primary key, ts real, amount real)")  # NOREPLY-повернені (клієнт підтвердив після нуджа)
+DB.execute("create table if not exists poll_votes(chat_id int, poll text, option text, custom text default '', ts real, primary key(chat_id,poll))")  # відповіді на опитування
+DB.execute("create table if not exists poll_wait(chat_id int primary key, poll text, ts real)")  # очікуємо вільний текст (свій варіант / які товари)
 try: DB.execute("alter table scheduled add column img text default ''")
 except Exception: pass
 try: DB.execute("alter table customers add column blocked real default 0")  # коли заблокував/видалив бота (ts), 0 = активний
@@ -657,6 +659,9 @@ def resolve_ids(seg):
             or exists(select 1 from orders o where o.phone=c.phone and {SOLD_F}
                 and (lower(o.items) like '%lipoland%' or o.items like '%іполенд%' or o.items like '%омана%'))""").fetchall()
         return [r[0] for r in rows]
+    if seg.startswith("poll:"):   # хто обрав цю опцію в опитуванні (напр. poll:discount) — для персональних ЧП-розсилок
+        opt = seg[5:]
+        return [r[0] for r in DB.execute("select chat_id from poll_votes where poll=? and option=?", (BF_POLL, opt))]
     if seg.startswith("lvl:"):   # рівень лояльності (виключна смуга за сумою покупок) — як у блоці «Рівні бази»
         lo, hi = {"diamond": (25000, 1e12), "vip": (15000, 25000), "smart": (9000, 15000),
                   "basic": (4500, 9000), "none": (0.01, 4500)}.get(seg[4:], (None, None))
@@ -776,6 +781,13 @@ def add_scheduled(arg):
 
 def on_text(chat_id, text):
     t = text.strip()
+    MENU_LABELS = {"🎁 Подарунки", "🎟 Мої купони", "💎 Мій рівень", "🛍 Добірка для малюка", "💬 Менеджер"}
+    if t and not t.startswith("/") and t not in MENU_LABELS:  # очікуємо вільний текст опитування?
+        pw = DB.execute("select poll from poll_wait where chat_id=?", (chat_id,)).fetchone()
+        if pw:
+            DB.execute("update poll_votes set custom=? where chat_id=? and poll=?", (t[:500], chat_id, pw[0]))
+            DB.execute("delete from poll_wait where chat_id=?", (chat_id,)); DB.commit()
+            return send(chat_id, "Дякуємо, записали! 🙌 На Чорну пʼятницю чекайте від нас сюрприз 💗")
     if t == "🎁 Подарунки":
         row = DB.execute("select stage, coalesce(phone,'') from customers where chat_id=?", (chat_id,)).fetchone()
         if not row or not row[1]:
@@ -1078,9 +1090,47 @@ def znana_cat(chat_id, cat):
                          add_utm(items[0]["link"].rsplit("/", 1)[0] + "/catalog", "bot-catalog"))])
     return send(chat_id, "Що далі?", rows)
 
+BF_POLL = "bf2026"
+BF_OPTS = {"discount": "💰 Знижка на товари", "delivery": "🚚 Безкоштовна доставка",
+           "cert": "🎁 Подарунковий сертифікат", "own": "✍️ Свій варіант"}
+BF_MSG = ("🖤 <b>Чорна пʼятниця вже близько!</b>\n\n"
+          "Кожному, хто відповість, на ЧП — <b>секретний подарунок на суму від 500 до 1000 грн</b> до замовлення 🎁\n\n"
+          "Хочемо зробити акцію корисною саме для вас. Що було б найкращим? Тисніть кнопку 👇")
+BF_THANKS = ("🖤 Готово, ви в грі! На Чорну пʼятницю — ваш <b>секретний подарунок на 500–1000 грн</b> до замовлення, "
+             "а бонус зробимо саме під ваш вибір 💗 Чекайте від нас звістку на ЧП!")
+
+def bf_poll_send(seg):
+    # розсилка опитування (callback-кнопки); пропускаємо тих, хто вже відповів — безпечно запускати повторно
+    voted = {r[0] for r in DB.execute("select chat_id from poll_votes where poll=?", (BF_POLL,))}
+    btns = [[(v, f"bf:{k}")] for k, v in BF_OPTS.items()]
+    ids = [c for c in resolve_ids(seg) if c not in voted]
+    ok = 0
+    for cid in ids:
+        try: send(cid, BF_MSG, btns); ok += 1
+        except Exception: pass
+        time.sleep(0.05)  # ~20 msg/s — під ліміт Telegram
+    for a in ADMINS:
+        try: send(a, f"📊 Опитування ЧП надіслано: {ok}/{len(ids)} (сегмент: {seg or 'усі'})")
+        except Exception: pass
+
 def on_callback(cb):
     chat_id, data = cb["message"]["chat"]["id"], cb["data"]
     tg("answerCallbackQuery", callback_query_id=cb["id"])
+    if data.startswith("bf:"):
+        opt = data[3:]
+        if opt not in BF_OPTS: return
+        DB.execute("insert into poll_votes(chat_id,poll,option,ts) values(?,?,?,?) "
+                   "on conflict(chat_id,poll) do update set option=excluded.option, ts=excluded.ts",
+                   (chat_id, BF_POLL, opt, time.time())); DB.commit()
+        send(chat_id, BF_THANKS)
+        if opt in ("discount", "own"):
+            DB.execute("insert into poll_wait(chat_id,poll,ts) values(?,?,?) "
+                       "on conflict(chat_id) do update set poll=excluded.poll, ts=excluded.ts",
+                       (chat_id, BF_POLL, time.time())); DB.commit()
+            q = ("А на які саме товари особливо чекаєте знижку? Напишіть — ми врахуємо це в акції 👇"
+                 if opt == "discount" else "Напишіть, що хотіли б отримати — ми подумаємо, як це зробити 👇")
+            send(chat_id, q)
+        return
     if data.startswith("cfmok:"):
         return cfm_do(chat_id, data[6:], None)
     if data.startswith("cfmno:"):
@@ -2411,6 +2461,12 @@ class Hook(BaseHTTPRequestHandler):
         if u.path == "/seglist" and authed:
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
             self.wfile.write(seglist_page(qs.get("seg", [""])[0]).encode()); return
+        if u.path == "/bfpollsend" and authed:   # розіслати опитування ЧП (фоново)
+            threading.Thread(target=bf_poll_send, args=(qs.get("seg", [""])[0],), daemon=True).start()
+            self.send_response(302); self.send_header("Location", f"/bfpoll?key={os.environ.get('ADMIN_KEY','')}"); self.end_headers(); return
+        if u.path == "/bfpoll" and authed:   # результати опитування ЧП
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
+            self.wfile.write(bfpoll_page().encode()); return
         if u.path != "/admin" or not authed:
             self.send_response(200); self.end_headers(); self.wfile.write(b"ok"); return
         self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers()
@@ -2472,6 +2528,42 @@ def seglist_page(seg):
 <p style=color:var(--ink2);font-size:12.5px;margin:0 0 8px>🤖 = є в боті, кому реально можна слати (<b>{in_bot}</b> з {total}). Розсилка: <code>/schedule ДД.ММ ГГ:ХХ {seg} текст</code> — піде лише цим {in_bot}.</p>
 <table><tr><th>Клієнт</th><th>Телефон</th><th class=n>Сума покупок</th><th class=n>Бот</th></tr>{body or '<tr><td>порожньо</td></tr>'}</table>
 {more}</section></div></html>"""
+
+def bfpoll_page():
+    AK = os.environ.get("ADMIN_KEY", "")
+    cnt = {o: n for o, n in DB.execute("select option, count(*) from poll_votes where poll=? group by option", (BF_POLL,))}
+    total = sum(cnt.values())
+    mx = max(cnt.values(), default=1) or 1
+    order = ["discount", "delivery", "cert", "own"]
+    bars = "".join(
+        f"<tr><td><a href='/seglist?key={AK}&seg=poll:{k}'>{BF_OPTS[k]}</a></td><td class=n>{cnt.get(k,0)}</td>"
+        f"<td class=n>{(cnt.get(k,0)/total*100 if total else 0):.0f}%</td>"
+        f"<td class=b><i style=width:{int(cnt.get(k,0)/mx*100)}%></i></td></tr>" for k in order)
+    customs = DB.execute("select option, custom, ts from poll_votes where poll=? and coalesce(custom,'')!='' order by ts desc", (BF_POLL,)).fetchall()
+    clist = "".join(f"<tr><td>{BF_OPTS.get(o, o)}</td><td>{html.escape(c)}</td>"
+                    f"<td class=n>{time.strftime('%d.%m %H:%M', time.localtime(ts))}</td></tr>" for o, c, ts in customs)
+    return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Опитування ЧП</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🖤</text></svg>">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
+{CAB_CSS}
+<div class=top><h1>🖤 Опитування · Чорна пʼятниця</h1><span class=upd>{total} відповіли</span><span class=upd style=margin-left:auto><a href="/admin?key={AK}">← до кабінету</a></span></div>
+<div class=grid>
+<section class="p wide"><h2>Що хочуть на ЧП</h2>
+<table><tr><th>Варіант</th><th class=n>Голосів</th><th class=n>%</th><th class=b></th></tr>{bars}</table>
+<p style=color:var(--ink2);font-size:12.5px;margin-top:8px>Клік по варіанту — список тих, хто його обрав. Потім кожній групі шлемо її бонус: <code>/schedule ДД.ММ ГГ:ХХ poll:discount текст</code> (poll:discount / poll:delivery / poll:cert / poll:own).</p>
+</section>
+<section class="p wide"><h2>📨 Розіслати опитування</h2>
+<form action="/bfpollsend" method="get" onsubmit="return confirm('Надіслати опитування? Тим, хто вже відповів, не піде.')" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+<input type=hidden name=key value="{AK}">
+<input name=seg placeholder="сегмент (порожньо = усі підписники)" style="flex:1;min-width:220px;padding:8px 10px;border:1px solid var(--line);border-radius:8px">
+<button style="background:#C94F72;color:#fff;border:0;padding:9px 18px;border-radius:8px;font-size:14px;cursor:pointer">📨 Надіслати</button>
+</form>
+<p style=color:var(--ink2);font-size:12.5px;margin-top:8px>Піде лише тим, хто ще не відповів — можна запускати повторно, щоб зловити нових. Сегменти: <code>buyers</code>, <code>lvl:vip</code>, <code>all~bought:...</code> тощо.</p>
+</section>
+<section class="p wide"><h2>✍️ Текстові відповіді <small>які товари / свій варіант</small></h2>
+<table><tr><th>Варіант</th><th>Відповідь</th><th class=n>Коли</th></tr>{clist or '<tr><td colspan=3 style=color:var(--ink3)>Поки порожньо</td></tr>'}</table>
+</section>
+</div></html>"""
 
 def client_page(cid):
     c = DB.execute("select phone,stage,dob,created,coalesce(store,''),order_id from customers where chat_id=?", (cid,)).fetchone()
@@ -3012,7 +3104,7 @@ def seo_page(store=None):
 </div></html>"""
 
 def _nav(active, AK):
-    tabs = [("Огляд", f"/admin?key={AK}"), ("Розсилки", f"/posts?key={AK}"), ("KPI", f"/kpi?key={AK}"), ("SEO", f"/seo?key={AK}")]
+    tabs = [("Огляд", f"/admin?key={AK}"), ("Розсилки", f"/posts?key={AK}"), ("Опитування", f"/bfpoll?key={AK}"), ("KPI", f"/kpi?key={AK}"), ("SEO", f"/seo?key={AK}")]
     return '<div class=nav>' + "".join(f'<a class="{"on" if active==lbl else ""}" href="{url}">{lbl}</a>' for lbl, url in tabs) + '</div>'
 
 def admin_page():
