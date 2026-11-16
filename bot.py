@@ -653,6 +653,14 @@ def resolve_ids(seg):
         conds = " or ".join("o.items like ?" for _ in kws)
         rows = DB.execute(f"select distinct c.chat_id from customers c join orders o on o.phone=c.phone and o.phone!='' where o.{SOLD_F} and ({conds})", [f"%{k}%" for k in kws]).fetchall()
         return [r[0] for r in rows]
+    if seg.startswith("bought30:"):
+        # купував товар за ключем за ОСТАННІ 30 днів — щоб не слати знижку свіжим покупцям (напр. all~bought30:амин)
+        kws = [k for k in seg[9:].split("|") if k]
+        if not kws: return []
+        cut = int(time.time()) - 30 * 86400
+        conds = " or ".join("o.items like ?" for _ in kws)
+        rows = DB.execute(f"select distinct c.chat_id from customers c join orders o on o.phone=c.phone and o.phone!='' where o.{SOLD_F} and o.ts>? and ({conds})", [cut] + [f"%{k}%" for k in kws]).fetchall()
+        return [r[0] for r in rows]
     if seg == "doman":
         # Картки Домана / Ліполенд: малюки за віком (усі baby-стадії + lipoland) АБО минулі покупці бренду Ліполенд
         rows = DB.execute(f"""select chat_id from customers c where c.stage in ('m0_3','m3_6','m6_12','lipoland')
