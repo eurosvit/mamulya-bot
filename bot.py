@@ -711,8 +711,21 @@ def resolve_ids(seg):
 
 def fmt(n): return f"{n:,.0f}".replace(",", " ")
 
+def loyalty_block(total, cur, nxt):
+    # персональний блок лояльності для розсилок: є рівень → знижка; близько до наступного → нудж; не наш клієнт → порожньо
+    if total <= 0:
+        return ""   # не знаємо / ще не клієнт → нічого
+    lines = []
+    if cur:
+        lines.append(f"💎 Ваш рівень — <b>{cur[2]}</b>, постійна знижка <b>{cur[1]}%</b> на всі покупки у наших магазинах.")
+    else:
+        lines.append(f"🌱 Ваших покупок у нас уже на <b>{fmt(total)} грн</b>.")
+    if nxt and (nxt[0] - total) <= 2500:   # лишилось трішки до наступного рівня
+        lines.append(f"🔥 До знижки <b>{nxt[1]}%</b> ({nxt[2]}) лишилось всього <b>{fmt(nxt[0]-total)} грн</b> — саме час на подарунки!")
+    return "\n".join(lines)
+
 def personalize(body, cid):
-    # ponytail: заповнюємо {імя}/{сума}/{залишок}/{рівень}/{поточна} під кожного; немає токенів — повертаємо як є
+    # ponytail: заповнюємо {імя}/{сума}/{залишок}/{рівень}/{поточна}/{лояльність} під кожного; немає токенів — повертаємо як є
     if "{" not in body: return body
     row = DB.execute("select coalesce(phone,'') from customers where chat_id=?", (cid,)).fetchone()
     phone = row[0] if row else ""
@@ -736,8 +749,10 @@ def personalize(body, cid):
     repl = {"{сума}": fmt(total),
             "{залишок}": fmt(nxt[0] - total) if nxt else "0",
             "{рівень}": f"{nxt[1]}%" if nxt else f"{cur[1]}%" if cur else "",
-            "{поточна}": f"{cur[1]}%" if cur else "0%"}
+            "{поточна}": f"{cur[1]}%" if cur else "0%",
+            "{лояльність}": loyalty_block(total, cur, nxt)}
     for k, v in repl.items(): body = body.replace(k, v)
+    body = re.sub(r"\n{3,}", "\n\n", body).strip()   # прибираємо зайві пусті рядки, якщо блок порожній
     return body
 
 def run_broadcast(seg, body, btn, img=None, exclude=None):
