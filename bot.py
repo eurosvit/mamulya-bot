@@ -1312,7 +1312,7 @@ def pull_all(sajts, max_pages=80):
             ot = str(o.get("orderTime") or "")[:19]  # повний час для порівняння «перше/повторне»
             if len(ot) >= 7:
                 pd = str(o.get("paymentDate") or "")[:7]  # дата продажу (міс) — для виручки за датою продажу
-                out.append((ph, ot, int(o.get("statusId") or 0), o.get("campaignId"), float(o.get("paymentAmount") or 0), (o.get("utmMedium") or "").strip().lower(), pd))
+                out.append((ph, ot, int(o.get("statusId") or 0), o.get("campaignId"), float(o.get("paymentAmount") or 0), (o.get("utmMedium") or "").strip().lower(), pd, int(o.get("rejectionReason") or 0)))
         if len(data) < 100: break
         page += 1; time.sleep(7)
     return out
@@ -1405,13 +1405,14 @@ def kpi_refresh():
         M = defaultdict(lambda: {"zay": 0, "canc": 0, "canc_amt": 0.0, "decl": 0, "sold": 0, "sold_amt": 0.0, "returned": 0, "seo_sold": 0, "seo_rev": 0.0, "bot_n": 0, "bot_amt": 0.0})
         # повторні рахуємо ЛИШЕ по SOLD (реально отримане) — інакше ловимо дублі-заявки
         first = {}
-        for ph, ot, st, camp, amt, utm, pd in orders:
+        for ph, ot, st, camp, amt, utm, pd, rr in orders:
             if ph and st == 5:
                 if ph not in first or ot < first[ph]: first[ph] = ot
         buyers = defaultdict(set); repeat = defaultdict(set)
         seo_buyers = defaultdict(set); seo_new = defaultdict(set)
         SD = defaultdict(lambda: [0, 0.0])   # SOLD за ДАТОЮ ПРОДАЖУ (paymentDate) — реальна виручка місяця
-        for ph, ot, st, camp, amt, utm, pd in orders:
+        for ph, ot, st, camp, amt, utm, pd, rr in orders:
+            if st == 13 and rr == 109: continue   # «Дубль замовлення» — не реальна заявка, не рахуємо ніде
             if st == 5 and pd: SD[pd][0] += 1; SD[pd][1] += amt
             ym = ot[:7]
             organic = not camp   # «без реклами» (порожня кампанія) = органіка/прямі = SEO
