@@ -718,7 +718,7 @@ def loyalty_block(total, cur, nxt):
     lines = []
     if cur:
         lines.append(f"💎 Ваш рівень — <b>{cur[2]}</b>, постійна знижка <b>{cur[1]}%</b> на всі покупки у наших магазинах.")
-        lines.append("<i>ℹ️ Знижка рівня діє на товари без акції та не сумується з іншими знижками.</i>")
+        lines.append("<i>Знижка рівня діє на товари без акції та не сумується з іншими знижками.</i>")
     else:
         lines.append(f"🌱 Ваших покупок у нас уже на <b>{fmt(total)} грн</b>.")
     if nxt and (nxt[0] - total) <= 2500:   # лишилось трішки до наступного рівня
@@ -2255,8 +2255,10 @@ class Hook(BaseHTTPRequestHandler):
                 body = info_page("Некоректне посилання.")
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body); return
-        if u.path in ("/spir.jpg", "/home.jpg"):  # банери розсилок (бот віддає сам)
-            fn = _SPIR_IMG if u.path == "/spir.jpg" else os.path.join(os.path.dirname(os.path.abspath(__file__)), "home-wear.jpg")
+        if u.path in ("/spir.jpg", "/home.jpg", "/gift.jpg"):  # банери розсилок (бот віддає сам)
+            _D = os.path.dirname(os.path.abspath(__file__))
+            fn = {"/spir.jpg": _SPIR_IMG, "/home.jpg": os.path.join(_D, "home-wear.jpg"),
+                  "/gift.jpg": os.path.join(_D, "gift_collage.jpg")}[u.path]
             try:
                 with open(fn, "rb") as fh: data = fh.read()
                 self.send_response(200); self.send_header("Content-Type", "image/jpeg")
