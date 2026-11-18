@@ -2174,6 +2174,25 @@ class Hook(BaseHTTPRequestHandler):
                     if DB.execute("insert or ignore into sched_excl values(?,?)", (sid, cid)).rowcount: n_ += 1
             DB.commit()
             self.send_response(200); self.end_headers(); self.wfile.write(f"excluded {n_} buyers from #{sid}".encode()); return
+        if u.path == "/schedpreview" and authed:  # надіслати прев'ю розсилки ?id=N лише адмінам (перегляд перед запуском)
+            sid = qs.get("id", [""])[0]
+            row = DB.execute("select seg,body,btn,coalesce(img,'') from scheduled where id=?", (sid,)).fetchone()
+            if not row:
+                msg = "not found"
+            else:
+                seg, body, btn_s, img = row
+                btn = tuple(btn_s.split("|", 1)) if btn_s else None
+                kb = [[(btn[0], add_utm(btn[1], seg))]] if btn else None
+                n = 0
+                for a in ADMINS:
+                    try:
+                        send(a, "👁 <b>Прев'ю розсилки #" + str(sid) + "</b> (так її побачать клієнти):")
+                        send_photo_url(a, img, body, kb) if img else send(a, body, kb)
+                        n += 1
+                    except Exception as e: print("preview", e)
+                msg = f"прев'ю #{sid} надіслано {n} адмінам у Telegram"
+            self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
+            self.wfile.write(msg.encode()); return
         if u.path == "/scheddel" and authed:  # скасувати заплановану розсилку ?id=N
             sid = int(qs.get("id", ["0"])[0] or 0)
             nd = DB.execute("delete from scheduled where id=? and done=0", (sid,)).rowcount
@@ -2716,6 +2735,7 @@ def posts_page(month=""):
             eff = len([c for c in resolve_ids((seg or '').lower()) if not nex or not DB.execute('select 1 from sched_excl where sid=? and chat_id=?', (sid, c)).fetchone()])
             st = f"⏳ очікує · <b>{eff}</b> отримувачів" + (f" <span style=color:#B8325A>(−{nex} вручну)</span>" if nex else "")
             who = (f"<a href='/sched?key={AK}&id={sid}'>👁 кому піде</a> · "
+                   f"<a href='/schedpreview?key={AK}&id={sid}' style=color:#7C3AED>👁 прев'ю мені</a> · "
                    f"<a href='/schednow?key={AK}&id={sid}' onclick=\"return confirm('Відправити розсилку #{sid} зараз ({eff} отримувачів)?')\" "
                    f"style=color:#2E8B57;font-weight:600>▶️ зараз</a>")
         sched_rows += f"<tr><td>#{sid}</td><td>{when}</td><td>{SEG_UA.get(seg, seg or 'усі')}</td><td>{st}</td><td>{who}</td><td style=max-width:420px;white-space:pre-wrap;color:#6E5F65;font-size:12.5px>{body or ''}" + ("  🔘" if btn else "") + ("  🖼" if img else "") + "</td></tr>"
