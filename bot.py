@@ -155,11 +155,11 @@ def send_photo(chat_id, path, caption):
     return json.load(urllib.request.urlopen(req, timeout=30))
 
 def send_photo_url(chat_id, photo_url, caption, buttons=None):
-    # ponytail: фото/гіф за URL — Telegram сам тягне; .gif шлемо як анімацію (sendAnimation), інакше піде перший кадр
-    is_gif = photo_url.lower().split("?")[0].endswith(".gif")
-    method = "sendAnimation" if is_gif else "sendPhoto"
+    # ponytail: фото/гіф/відео за URL — Telegram сам тягне; .gif та .mp4 шлемо як анімацію (автоплей, без звуку), інакше фото
+    is_anim = photo_url.lower().split("?")[0].endswith((".gif", ".mp4"))
+    method = "sendAnimation" if is_anim else "sendPhoto"
     kw = dict(chat_id=chat_id, caption=caption[:1024], parse_mode="HTML")
-    kw["animation" if is_gif else "photo"] = photo_url
+    kw["animation" if is_anim else "photo"] = photo_url
     if buttons:
         kw["reply_markup"] = {"inline_keyboard": [[
             {"text": t, **({"url": d} if d.startswith("http") else {"callback_data": d})} for t, d in row] for row in buttons]}
