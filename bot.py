@@ -1298,6 +1298,12 @@ def sd_get(qs):
 def sd_count(qs):
     return (sd_get(qs).get("totals") or {}).get("count", 0)
 
+def as_int(v):
+    # ponytail: SalesDrive-поле може бути скаляром, списком або порожнім — безпечно в int
+    if isinstance(v, (list, tuple)): v = v[0] if v else 0
+    try: return int(v)
+    except (TypeError, ValueError): return 0
+
 def pull_all(sajts, max_pages=80):
     # один прохід по історії магазину: (phone, час, statusId, campaignId, amount) для кожного замовлення
     sj = "".join(f"&filter[sajt][]={s}" for s in sajts)
@@ -1312,7 +1318,7 @@ def pull_all(sajts, max_pages=80):
             ot = str(o.get("orderTime") or "")[:19]  # повний час для порівняння «перше/повторне»
             if len(ot) >= 7:
                 pd = str(o.get("paymentDate") or "")[:7]  # дата продажу (міс) — для виручки за датою продажу
-                out.append((ph, ot, int(o.get("statusId") or 0), o.get("campaignId"), float(o.get("paymentAmount") or 0), (o.get("utmMedium") or "").strip().lower(), pd, int(o.get("rejectionReason") or 0)))
+                out.append((ph, ot, int(o.get("statusId") or 0), o.get("campaignId"), float(o.get("paymentAmount") or 0), (o.get("utmMedium") or "").strip().lower(), pd, as_int(o.get("rejectionReason"))))
         if len(data) < 100: break
         page += 1; time.sleep(7)
     return out
