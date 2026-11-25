@@ -2734,6 +2734,25 @@ def posts_page(month=""):
         for bucket in (mom.setdefault(time.strftime("%Y-%m", time.localtime(ts)), [0, 0, 0, 0, 0.0]),
                        segm.setdefault(target or "усі", [0, 0, 0, 0, 0.0])):
             bucket[0] += 1; bucket[1] += deliv; bucket[2] += clk; bucket[3] += orders; bucket[4] += rev
+    # 🚫 Відписки: прив'язка до останньої отриманої дії перед блоком + тип клієнта.
+    # ponytail: N+1 по заблокованих (їх небагато); згрупувати, якщо колись стане повільно.
+    def _after_label(k):
+        if k.startswith("post:"): return "post"
+        for pfx in ("promo_r", "promo0", "near", "reviewask", "coupexp", "spir"):
+            if k.startswith(pfx): return "remind"
+        return "other"
+    unsub_by_pid = {}
+    unsub_after = {"📨 Розсилка": 0, "🔔 Нагадування": 0, "· Інше / до 1-го меседжу": 0}
+    unsub_type = {"🆕 Не купували": 0, "💜 Нові (1 покупка)": 0, "⭐ Повторні (2+)": 0}
+    for cid, bts, ph in q("select chat_id, blocked, coalesce(phone,'') from customers where coalesce(blocked,0)>0"):
+        sc = n(f"select count(*) from orders where phone=? and {SOLD_F}", ph) if ph else 0
+        unsub_type["⭐ Повторні (2+)" if sc >= 2 else "💜 Нові (1 покупка)" if sc == 1 else "🆕 Не купували"] += 1
+        last = DB.execute("select key from sent where chat_id=? and ts<=? order by ts desc limit 1", (cid, bts)).fetchone()
+        lab = _after_label(last[0]) if last else "other"
+        if lab == "post":
+            pid = int(last[0][5:]); unsub_by_pid[pid] = unsub_by_pid.get(pid, 0) + 1; unsub_after["📨 Розсилка"] += 1
+        elif lab == "remind": unsub_after["🔔 Нагадування"] += 1
+        else: unsub_after["· Інше / до 1-го меседжу"] += 1
     posts = allposts[:50]
     rows = ""
     for pid, ts, target, text in posts:
@@ -2742,7 +2761,7 @@ def posts_page(month=""):
         when = time.strftime("%d.%m %H:%M", time.localtime(ts))
         conv = f"{orders/deliv*100:.0f}%" if deliv else "—"
         ord_cell = f"<a href='/border?key={AK}&id={pid}'>{orders}</a>" if orders else "0"
-        rows += f"<tr><td>{when}</td><td>{SEG_UA.get(target, target)}</td><td class=n>{deliv}</td><td class=n>{clk}</td><td class=n>{ctr}</td><td class=n>{ord_cell}</td><td class=n>{conv}</td><td class=n>{rev:,.0f}".replace(",", " ") + f"</td><td style=max-width:240px;white-space:normal;color:#6E5F65>{text[:80]}</td></tr>"
+        rows += f"<tr><td>{when}</td><td>{SEG_UA.get(target, target)}</td><td class=n>{deliv}</td><td class=n>{clk}</td><td class=n>{ctr}</td><td class=n>{ord_cell}</td><td class=n>{conv}</td><td class=n>{rev:,.0f}".replace(",", " ") + f"</td><td class=n style=color:#E05A50>{unsub_by_pid.get(pid, 0) or ''}</td><td style=max-width:240px;white-space:normal;color:#6E5F65>{text[:80]}</td></tr>"
     # розріз по магазинах: замовлення отримувачів розсилок ЗА ПЕРІОД, 7 днів, по магазину
     bs = {}
     for pid in pm:
@@ -2804,6 +2823,18 @@ def posts_page(month=""):
         "<table><tr><th>Магазин</th><th class=n>Активних</th><th class=n>🚫 Заблок.</th></tr>"
         + "".join(f"<tr><td>{st}</td><td class=n>{c - (bl or 0)}</td><td class=n>{bl or 0}</td></tr>" for st, c, bl in store_rows_c) + "</table>"
         f"<p class=sub>Всього заблокували бот: <b>{tot_block}</b> із {tot_cust} ({tot_block * 100 // tot_cust if tot_cust else 0}%) · за 7 днів: <b>{block7}</b></p></section>")
+    # 🚫 розклад відписок: хто (тип клієнта) + після чого (остання дія перед блоком)
+    def _unsub_rows(d, tot):
+        return "".join(f"<tr><td>{k}</td><td class=n>{v}</td><td class=n>{v * 100 // tot if tot else 0}%</td></tr>" for k, v in d.items())
+    _ut = sum(unsub_type.values()); _ua = sum(unsub_after.values())
+    unsub_html = ('<section class=p><h2>🚫 Хто відписується <small>тип клієнта на момент блоку</small></h2>'
+        "<table><tr><th>Тип</th><th class=n>Відписок</th><th class=n>%</th></tr>"
+        + _unsub_rows(unsub_type, _ut) + "</table>"
+        f"<p class=sub>Усього: <b>{_ut}</b></p></section>"
+        '<section class=p><h2>🚫 Після чого відписуються <small>остання отримана дія перед блоком</small></h2>'
+        "<table><tr><th>Дія</th><th class=n>Відписок</th><th class=n>%</th></tr>"
+        + _unsub_rows(unsub_after, _ua) + "</table>"
+        "<p class=sub>Яка саме розсилка — колонка «−Відпис→» у таблиці нижче.</p></section>")
     # 📝 статус дрипу прохань про Google-відгук
     rev_live = os.environ.get("REVIEW_LIVE") == "1"
     rev_sent = DB.execute("select count(*) from sent where key='reviewask'").fetchone()[0]
@@ -2894,7 +2925,7 @@ def posts_page(month=""):
 {mom_html}
 {seg_html}
 <section class="p wide"><h2>Надіслані розсилки <small>останні 50 · замовлення/оборот — отримувачі протягом 7 днів після</small></h2>
-<table><tr><th>Коли</th><th>Сегмент</th><th class=n>Доставлено</th><th class=n>Кліки</th><th class=n>CTR</th><th class=n>Замовлень</th><th class=n>Конв.</th><th class=n>Оборот</th><th>Текст</th></tr>{rows or '<tr><td>ще не було розсилок — надішліть /post у боті</td></tr>'}</table></section>
+<table><tr><th>Коли</th><th>Сегмент</th><th class=n>Доставлено</th><th class=n>Кліки</th><th class=n>CTR</th><th class=n>Замовлень</th><th class=n>Конв.</th><th class=n>Оборот</th><th class=n>−Відпис→</th><th>Текст</th></tr>{rows or '<tr><td>ще не було розсилок — надішліть /post у боті</td></tr>'}</table></section>
 <section class="p"><h2>Результат по магазинах <small>замовлення отримувачів розсилок, 7 днів</small></h2>
 <table><tr><th>Магазин</th><th class=n>Замовлень</th><th class=n>Оборот</th></tr>{store_rows}</table></section>
 <section class="p wide"><h2>📧 Авто-листи <small>відкриття приблизні (Gmail проксує картинки) · «перейшли в бот» і «нові» — точні</small></h2>
@@ -2902,6 +2933,7 @@ def posts_page(month=""):
 {spir_html}
 {review_html}
 {storecust_html}
+{unsub_html}
 <section class="p wide"><h2>Заплановані <small>бот надішле сам у вказаний час · керування: <code>/schedule</code> у боті</small></h2>
 <table><tr><th>ID</th><th>Коли</th><th>Сегмент</th><th>Статус</th><th>Отримувачі</th><th>Текст</th></tr>{sched_rows or '<tr><td>нема запланованих — додайте <code>/schedule ДД.ММ ГГ:ХХ сегмент текст</code></td></tr>'}</table></section>
 </div></html>"""
