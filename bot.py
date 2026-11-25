@@ -54,7 +54,7 @@ try: DB.execute("alter table kpi_cache add column ret_den int default 0")
 except Exception: pass
 try: DB.execute("alter table maillog add column clicked real default 0")  # клік по кнопці в бот (через /eb)
 except Exception: pass
-for _c in ("seo_sold", "seo_rev", "seo_new", "seo_den", "seo_sess", "returned"):
+for _c in ("seo_sold", "seo_rev", "seo_new", "seo_den", "seo_sess", "sess_all", "returned"):
     try: DB.execute(f"alter table kpi_cache add column {_c} int default 0")
     except Exception: pass
 try: DB.execute("alter table kpi_cache add column canc_amt real default 0")  # сума скасованих замовлень
@@ -1352,8 +1352,9 @@ def retag_stores():
         try: send(a, f"🔖 Перепозначено магазинів: <b>{n}</b> клієнтів (без мітки → за першим замовленням)")
         except Exception: pass
 
-def ga_sessions(prop):
-    # {YYYY-MM: органічні сесії GA4} з початку року; потрібні env GA_SA_KEY(JSON) + property
+def ga_sessions(prop, channel="Organic Search"):
+    # {YYYY-MM: сесії GA4} з початку року; channel=None → усі канали (весь трафік).
+    # потрібні env GA_SA_KEY(JSON) + property
     key = os.environ.get("GA_SA_KEY", "")
     if not (key and prop): return {}
     try:
@@ -1364,9 +1365,10 @@ def ga_sessions(prop):
             json.loads(key), scopes=["https://www.googleapis.com/auth/analytics.readonly"])
         creds.refresh(Request())
         body = {"dateRanges": [{"startDate": "2026-01-01", "endDate": "today"}],
-                "dimensions": [{"name": "yearMonth"}], "metrics": [{"name": "sessions"}],
-                "dimensionFilter": {"filter": {"fieldName": "sessionDefaultChannelGroup",
-                    "stringFilter": {"value": "Organic Search"}}}}
+                "dimensions": [{"name": "yearMonth"}], "metrics": [{"name": "sessions"}]}
+        if channel:
+            body["dimensionFilter"] = {"filter": {"fieldName": "sessionDefaultChannelGroup",
+                    "stringFilter": {"value": channel}}}
         r = requests.post(f"https://analyticsdata.googleapis.com/v1beta/properties/{prop}:runReport",
                           headers={"Authorization": f"Bearer {creds.token}"}, json=body, timeout=30)
         r.raise_for_status()
@@ -1456,6 +1458,8 @@ def kpi_refresh():
         if prop:
             for ym, s in ga_sessions(prop).items():
                 if ym >= "2026-01": DB.execute("update kpi_cache set seo_sess=? where store=? and ym=?", (s, store, ym))
+            for ym, s in ga_sessions(prop, None).items():   # усі канали (весь трафік) для KPI
+                if ym >= "2026-01": DB.execute("update kpi_cache set sess_all=? where store=? and ym=?", (s, store, ym))
             DB.commit()
     # «Усі магазини» за датою продажу — прямий запит без фільтра sajt (= те, що видно в CRM), останні 4 міс
     for ym in recent_months(4):
@@ -2496,6 +2500,8 @@ class Hook(BaseHTTPRequestHandler):
                 for ym, s in g.items():
                     if ym >= "2026-01":
                         n += DB.execute("update kpi_cache set seo_sess=? where store=? and ym=?", (s, st, ym)).rowcount
+                for ym, s in ga_sessions(prop, None).items():   # усі канали (весь трафік) для KPI
+                    if ym >= "2026-01": DB.execute("update kpi_cache set sess_all=? where store=? and ym=?", (s, st, ym))
                 res[st] = len(g)
             DB.commit()
             self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
@@ -3062,7 +3068,7 @@ def kpi_page(store=None):
     STORE = store if store in all_stores else all_stores[0]
     sw = "".join(f'<a class="{"on" if s==STORE else ""}" href="/kpi?key={AK}&store={urllib.parse.quote(s)}">{s}</a>' for s in all_stores)
     UA_MON = ["", "січень", "лютий", "березень", "квітень", "травень", "червень", "липень", "серпень", "вересень", "жовтень", "листопад", "грудень"]
-    rows = DB.execute("select ym, zay, canc, decl, sold, ret_num, ret_den, returned, coalesce(canc_amt,0), coalesce(sold_amt,0) from kpi_cache where store=? order by ym desc", (STORE,)).fetchall()
+    rows = DB.execute("select ym, zay, canc, decl, sold, ret_num, ret_den, returned, coalesce(canc_amt,0), coalesce(sold_amt,0), coalesce(sess_all,0) from kpi_cache where store=? order by ym desc", (STORE,)).fetchall()
     money = lambda v: f"{v or 0:,.0f}".replace(",", " ")
     upd = DB.execute("select max(updated) from kpi_cache").fetchone()[0]
     upd_s = time.strftime("%d.%m %H:%M", time.localtime(upd)) if upd else "—"
@@ -3075,12 +3081,12 @@ def kpi_page(store=None):
         return f"<td style=color:{col}><b>{p:.1f}%</b> <span style=color:#A1939A;font-weight:400>({num})</span></td>"
     out = ""
     tz = tc = td_ = ts = trn = trd = tret = 0
-    tca = tsa = 0
-    for ym, zay, canc, decl, sold, rn, rd, ret, camt, samt in rows:
+    tca = tsa = tsess = 0
+    for ym, zay, canc, decl, sold, rn, rd, ret, camt, samt, sess in rows:
         if ym < "2026-09": continue   # KPI-скасування рахуємо з вересня
         y, mm = ym.split("-"); nm = f"{UA_MON[int(mm)]} {y}"
-        tz += zay; tc += canc; td_ += decl; ts += sold; trn += rn; trd += rd; tret += (ret or 0); tca += (camt or 0); tsa += (samt or 0)
-        out += (f"<tr><td>{nm}</td><td>{zay}</td>"
+        tz += zay; tc += canc; td_ += decl; ts += sold; trn += rn; trd += rd; tret += (ret or 0); tca += (camt or 0); tsa += (samt or 0); tsess += (sess or 0)
+        out += (f"<tr><td>{nm}</td><td class=n>{sess or '—'}</td><td>{zay}</td>"
                 + cell(canc, zay, "#B8325A", hi=18)
                 + f"<td class=n style=color:#B8325A>{money(camt)} грн</td>"
                 + cell(decl, zay, "#A86A1F")
@@ -3089,7 +3095,7 @@ def kpi_page(store=None):
                 + cell(ret or 0, zay, "#A86A1F")
                 + cell(rn, rd, "#7C3AED", good=15) + "</tr>")
     if rows:
-        out += (f"<tr style=border-top:2px solid #E8DCD8;font-weight:700><td>Разом</td><td>{tz}</td>"
+        out += (f"<tr style=border-top:2px solid #E8DCD8;font-weight:700><td>Разом</td><td class=n>{tsess or '—'}</td><td>{tz}</td>"
                 + cell(tc, tz, "#B8325A", hi=18)
                 + f"<td class=n style=color:#B8325A>{money(tca)} грн</td>"
                 + cell(td_, tz, "#A86A1F")
@@ -3139,10 +3145,11 @@ def kpi_page(store=None):
 {sd_html}
 {nr_html}
 <section class="p wide"><h2>KPI по місяцях <small>{STORE} · джерело SalesDrive · % і кількість у дужках</small></h2>
-<table id=kt><tr><th>Місяць</th><th>Заявки</th><th>Скасовано ≤18%</th><th>Сума скасов.</th><th>Відмова</th><th>Продано</th><th>Сума продано</th><th>Повернення</th><th>Повторні ≥15%</th></tr>{out or ('<tr><td>ще не завантажено — тисни «Оновити з SalesDrive»</td></tr>' if empty else '')}</table>
+<table id=kt><tr><th>Місяць</th><th>Відвідувачі</th><th>Заявки</th><th>Скасовано ≤18%</th><th>Сума скасов.</th><th>Відмова</th><th>Продано</th><th>Сума продано</th><th>Повернення</th><th>Повторні ≥15%</th></tr>{out or ('<tr><td>ще не завантажено — тисни «Оновити з SalesDrive»</td></tr>' if empty else '')}</table>
 <div style=color:#6E5F65;font-size:12.5px;margin-top:8px>
 <p style=margin:0 0 6px>У кожній клітинці — <b>% (кількість)</b>.</p>
 <ul style=margin:0;padding-left:18px;line-height:1.75>
+<li><b>Відвідувачі</b> — усі сесії сайту з GA4 (<b>весь трафік, усі канали</b>), а не лише органіка. «—» для магазинів без підключеної GA4-property. (Органіка окремо — на вкладці SEO.)</li>
 <li><b>Заявки</b> — усі замовлення місяця, без тесту й видалених (видалені = зазвичай спам/дублі).</li>
 <li><b>Скасовано</b> — статус «Скасований» до відправки ÷ заявки. Ціль <b>≤18%</b> (зелений = у нормі).</li>
 <li><b>Відмова</b> — Decline, не викупили посилку. Пізній статус — свіжий місяць занижує.</li>
