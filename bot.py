@@ -3181,10 +3181,11 @@ def seo_page(store=None):
         newp = f"{snew/sden*100:.0f}%" if sden else "—"
         vis = f"{sess:,}".replace(",", " ") if sess else "—"
         conv = f"{ssold/sess*100:.1f}%" if sess else "—"
+        rpv = f"{srev/sess:.1f} грн" if sess else "—"   # дохід з одного органічного відвідувача
         cg = "#6E5F65" if sess else "#C9BDB8"
         out += (f"<tr><td>{nm}</td><td><b>{ssold}</b></td><td>{('%d' % srev).replace(chr(44),' ')} грн</td>"
                 f"<td>{snew} <span style=color:#A1939A>({newp})</span></td><td>{rep}</td>"
-                f"<td style=color:{cg}>{vis}</td><td style=color:{cg}>{conv}</td></tr>")
+                f"<td style=color:{cg}>{vis}</td><td style=color:{cg}>{conv}</td><td style=color:{cg}>{rpv}</td></tr>")
     return f"""<!doctype html><html lang=uk><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>SEO — {STORE}</title><link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💗</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap">
@@ -3195,12 +3196,13 @@ def seo_page(store=None):
 <div class=nav style=margin-top:-6px>{sw}</div>
 <div class=grid>
 <section class="p wide"><h2>Органічні продажі <small>{STORE} · «без рекламної кампанії» = органіка/прямі</small></h2>
-<table id=st><tr><th>Місяць</th><th>Продажі</th><th>Оборот</th><th>Нові</th><th>Повторні</th><th>Відвідувачі</th><th>Конверсія</th></tr>{out or '<tr><td>ще не завантажено — тисни «Оновити» на вкладці KPI</td></tr>'}</table>
+<table id=st><tr><th>Місяць</th><th>Продажі</th><th>Оборот</th><th>Нові</th><th>Повторні</th><th>Відвідувачі</th><th>Конверсія</th><th>Грн/відвідувач</th></tr>{out or '<tr><td>ще не завантажено — тисни «Оновити» на вкладці KPI</td></tr>'}</table>
 <div style="color:#6E5F65;font-size:12.5px;margin-top:8px">
 <ul style=margin:0;padding-left:18px;line-height:1.75>
 <li><b>Продажі / Оборот</b> — отримані (SOLD) замовлення <b>без рекламної кампанії</b> (органічний пошук + прямі заходи; реклама/бот/соцмережі виключені).</li>
 <li><b>Нові / Повторні</b> — серед органічних покупців місяця: для кого це перша отримана покупка / хто вже купував.</li>
 <li><b>Відвідувачі</b> — органічні сесії з <b>GA4</b> (канал Organic Search), <b>Конверсія</b> = органічні продажі ÷ сесії. «—» для магазинів без підключеної GA4-property.</li>
+<li><b>Грн/відвідувач</b> — органічний оборот ÷ органічні сесії (дохід з одного візиту з пошуку).</li>
 </ul></div></section>
 </div></html>"""
 
