@@ -879,13 +879,18 @@ def on_text(chat_id, text):
             if c["fail_count"]: tail += f" · провалів: {c['fail_count']}"
             lines.append(f"{mark} {name}{tail}")
         log = st["log"][-10:]
-        try:
-            h = json.loads(urllib.request.urlopen(urllib.request.Request(
-                "https://znana-stock.onrender.com/api/health", headers={"User-Agent": "znana-watchdog"}), timeout=15).read())
-            lines.append("")
-            lines.append(f"Памʼять складу: <b>{h.get('memMb','?')} МБ</b> · аптайм {h.get('upMin','?')} хв")
-        except Exception:
-            pass
+        lines.append("")
+        for label, url in (("склад", "https://znana-stock.onrender.com/api/health"),
+                           ("сайт", "https://znanamama.com.ua/api/health")):
+            try:
+                h = json.loads(urllib.request.urlopen(urllib.request.Request(
+                    url, headers={"User-Agent": "znana-watchdog"}), timeout=15).read())
+                up = int(h.get("upMin") or 0)
+                # малий аптайм після тривоги = інстанс перезапускали, причина не в коді сторінки
+                mark = " ⚠️ щойно перезапускався" if up < 30 else ""
+                lines.append(f"Памʼять ({label}): <b>{h.get('memMb','?')} МБ</b> · аптайм {up} хв{mark}")
+            except Exception as e:
+                lines.append(f"Памʼять ({label}): не відповів ({str(e)[:40]})")
         lines.append("")
         lines.append("<b>Останні провали:</b>")
         lines += [f"{time.strftime('%d.%m %H:%M', time.localtime(x[0]))} · {x[1]} · {x[2]}" for x in reversed(log)] or ["жодного від старту бота"]
