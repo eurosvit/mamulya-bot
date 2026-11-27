@@ -759,6 +759,18 @@ def personalize(body, cid):
     body = re.sub(r"\n{3,}", "\n\n", body).strip()   # прибираємо зайві пусті рядки, якщо блок порожній
     return body
 
+def _bcast_send(cid, img, msg, kb):
+    # одна повторна спроба на 429 (Telegram rate-limit), з повагою до retry_after
+    for attempt in (1, 2):
+        try:
+            return send_photo_url(cid, img, msg, kb) if img else send(cid, msg, kb)
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt == 1:
+                try: ra = json.loads((e.read() or b"{}").decode("utf-8", "ignore")).get("parameters", {}).get("retry_after", 2)
+                except Exception: ra = 2
+                time.sleep(min(int(ra), 30) + 0.5); continue
+            raise
+
 def run_broadcast(seg, body, btn, img=None, exclude=None):
     ids = [c for c in resolve_ids(seg) if not exclude or c not in exclude]
     cur = DB.execute("insert into posts(ts,target,text) values(?,?,?)", (time.time(), seg or "всі", body))
@@ -768,10 +780,11 @@ def run_broadcast(seg, body, btn, img=None, exclude=None):
         try:
             msg = personalize(body, cid)
             kb = [[(b[0], track_url(b[1], pid, cid, seg))] for b in btn] if btn else None
-            send_photo_url(cid, img, msg, kb) if img else send(cid, msg, kb)
+            _bcast_send(cid, img, msg, kb)
             ok += 1
             DB.execute("insert or ignore into sent values(?,?,?)", (cid, f"post:{pid}", time.time()))
         except Exception as e: print("bcast", e)
+        time.sleep(0.05)   # ponytail: ~20/с, під лімітом Telegram 30/с; без паузи масова розсилка ловила 429 і губила ~30%
     DB.commit()
     return ok, len(ids)
 
@@ -2262,6 +2275,20 @@ class Hook(BaseHTTPRequestHandler):
             if qs.get("raw", [""])[0] == "1":
                 self.send_response(200); self.end_headers(); self.wfile.write(msg.encode()); return
             self.send_response(302); self.send_header("Location", f"/posts?key={os.environ.get('ADMIN_KEY','')}"); self.end_headers(); return
+        if u.path == "/resendmiss" and authed:  # дослати розсилку #id лише тим, хто НЕ отримав (виключаємо вже доставлених цього ж тексту)
+            sid = qs.get("id", [""])[0]
+            row = DB.execute("select seg,body,btn,coalesce(img,'') from scheduled where id=?", (sid,)).fetchone()
+            if not row:
+                msg = "not found"
+            else:
+                seg, body, btn_s, img = row
+                btn = [tuple(x.split("|", 1)) for x in btn_s.split("||") if x] or None
+                got = set()
+                for (p,) in DB.execute("select id from posts where text=?", (body,)):
+                    got |= {r[0] for r in DB.execute("select chat_id from sent where key=?", (f"post:{p}",))}
+                ok, total = run_broadcast(seg or None, body, btn, img or None, got)
+                msg = f"resent {ok}/{total} (excluded already-delivered {len(got)})"
+            self.send_response(200); self.end_headers(); self.wfile.write(msg.encode()); return
         if u.path == "/confirm":  # публічний: сторінка підтвердження замовлення (NOREPLY-нудж)
             oid = qs.get("order", [""])[0]; do = qs.get("do", [""])[0]; reason = qs.get("r", [""])[0]
             test = qs.get("test", [""])[0] == "1"; token = qs.get("t", [""])[0]
