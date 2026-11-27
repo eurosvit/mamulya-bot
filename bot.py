@@ -622,13 +622,16 @@ def parse_button(body):
     if "@img" in body:
         body, _, img = body.partition("@img"); body = body.strip(); img = img.strip() or None
     body = body.replace("\\n", "\n")  # ponytail: щоб у команді можна було писати \n замість реального переносу
-    btn = None
+    btns = []   # одна або кілька кнопок: "текст || кнопка1 || кнопка2" (кожна: ярлик магазину або «label | url»)
     if "||" in body:
-        body, _, raw = body.partition("||"); body = body.strip(); raw = raw.strip()
-        if raw.lower() in SHOP_BTN: btn = SHOP_BTN[raw.lower()]
-        elif "|" in raw:
-            lbl, _, url = raw.partition("|"); btn = (lbl.strip(), url.strip())
-    return body, btn, img
+        parts = body.split("||"); body = parts[0].strip()
+        for raw in parts[1:]:
+            raw = raw.strip()
+            if not raw: continue
+            if raw.lower() in SHOP_BTN: btns.append(SHOP_BTN[raw.lower()])
+            elif "|" in raw:
+                lbl, _, url = raw.partition("|"); btns.append((lbl.strip(), url.strip()))
+    return body, (btns or None), img
 
 def resolve_ids(seg):
     seg = (seg or "").lower()
@@ -764,7 +767,7 @@ def run_broadcast(seg, body, btn, img=None, exclude=None):
     for cid in ids:
         try:
             msg = personalize(body, cid)
-            kb = [[(btn[0], track_url(btn[1], pid, cid, seg))]] if btn else None
+            kb = [[(b[0], track_url(b[1], pid, cid, seg))] for b in btn] if btn else None
             send_photo_url(cid, img, msg, kb) if img else send(cid, msg, kb)
             ok += 1
             DB.execute("insert or ignore into sent values(?,?,?)", (cid, f"post:{pid}", time.time()))
@@ -799,7 +802,7 @@ def add_scheduled(arg):
     if run_ts < time.time(): run_ts = time.mktime((yr + 1, int(mo), int(d), int(hh), int(mm), 0, 0, 0, -1))
     body, btn, img = parse_button(rest.strip())
     cur = DB.execute("insert into scheduled(run_ts,seg,body,btn,img) values(?,?,?,?,?)",
-                     (run_ts, seg.lower(), body, "|".join(btn) if btn else "", img or ""))
+                     (run_ts, seg.lower(), body, "||".join(f"{l}|{u}" for l, u in btn) if btn else "", img or ""))
     DB.commit()
     return cur.lastrowid, run_ts, seg.lower(), len(resolve_ids(seg.lower()))
 
@@ -1588,7 +1591,7 @@ def cron():
         except Exception as e: print("nearlvl-block", e)
         DB.commit()
         # 🌿 Спіруліна-офер постпартум-клієнтам: ~10 днів після покупки, один раз (вмикається env SPIR_OFFER_LIVE=1)
-        if os.environ.get("SPIR_OFFER_LIVE") == "1":
+        if False:   # спіруліна-офер вимкнено 27.11.2026 — не давав результату (увімкнути: повернути os.environ.get("SPIR_OFFER_LIVE") == "1")
             try:
                 # прибрати порожні рядки догону (0 доставлено) — напр. від заблокованих чатів
                 DB.execute("delete from posts where target='postpartum' and not exists(select 1 from sent s where s.key='post:'||posts.id)")
@@ -1619,7 +1622,7 @@ def cron():
         # 📝 Прохання про Google-відгук: ЩОСЕРЕДИ до 5 осіб, раз на клієнта (середа — щоб не збігатись із блог-розсилками по вівторках).
         # Спочатку повторні (≥2 SOLD, SOLD>7д); коли закінчаться — будь-які покупці SOLD>7д («потім просто»).
         # Вмикається REVIEW_LIVE=1 у Render (вимкнути — прибрати/змінити цю змінну).
-        if os.environ.get("REVIEW_LIVE") == "1" and time.localtime().tm_wday == 2:  # tm_wday: середа = 2
+        if False and time.localtime().tm_wday == 2:  # авто-відгук Google вимкнено 27.11.2026 — не давав результату (увімкнути: повернути os.environ.get("REVIEW_LIVE") == "1")
             try:
                 recent = DB.execute("select count(*) from sent where key='reviewask' and ts>?", (now - 2 * DAY,)).fetchone()[0]
                 if recent == 0:  # цієї середи ще не слали — одна вибірка на тиждень
@@ -1650,7 +1653,7 @@ def cron():
                     DB.commit()
             except Exception as e: print("reviewask-block", e)
         for sid, seg, body, btn_s, img in DB.execute("select id,seg,body,btn,coalesce(img,'') from scheduled where done=0 and run_ts<=?", (now,)).fetchall():
-            btn = tuple(btn_s.split("|", 1)) if btn_s else None
+            btn = [tuple(x.split("|", 1)) for x in btn_s.split("||") if x] or None
             excl = {r[0] for r in DB.execute("select chat_id from sched_excl where sid=?", (sid,))}
             try:
                 ok, total = run_broadcast(seg or None, body, btn, img or None, excl)
@@ -2213,8 +2216,8 @@ class Hook(BaseHTTPRequestHandler):
                 msg = "not found"
             else:
                 seg, body, btn_s, img = row
-                btn = tuple(btn_s.split("|", 1)) if btn_s else None
-                kb = [[(btn[0], add_utm(btn[1], seg))]] if btn else None
+                btn = [tuple(x.split("|", 1)) for x in btn_s.split("||") if x] or None
+                kb = [[(b[0], add_utm(b[1], seg))] for b in btn] if btn else None
                 n = 0
                 for a in ADMINS:
                     try:
@@ -2251,7 +2254,7 @@ class Hook(BaseHTTPRequestHandler):
                 msg = "not found or already sent"
             else:
                 _id, seg, body, btn_s, img = row
-                btn = tuple(btn_s.split("|", 1)) if btn_s else None
+                btn = [tuple(x.split("|", 1)) for x in btn_s.split("||") if x] or None
                 excl = {r[0] for r in DB.execute("select chat_id from sched_excl where sid=?", (_id,))}
                 ok, total = run_broadcast(seg or None, body, btn, img or None, excl)
                 DB.execute("update scheduled set done=1, sent=?, total=? where id=?", (ok, total, _id)); DB.commit()
