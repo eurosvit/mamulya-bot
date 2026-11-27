@@ -2289,6 +2289,17 @@ class Hook(BaseHTTPRequestHandler):
                 ok, total = run_broadcast(seg or None, body, btn, img or None, got)
                 msg = f"resent {ok}/{total} (excluded already-delivered {len(got)})"
             self.send_response(200); self.end_headers(); self.wfile.write(msg.encode()); return
+        if u.path == "/whyme" and authed:  # діагностика: чому адмін(и) не в сегменті розсилки
+            seg = qs.get("seg", ["buyers~bought:автокрісл"])[0]
+            in_seg = set(resolve_ids(seg)); lines = [f"сегмент: {seg} ({len(in_seg)} осіб)"]
+            for a in ADMINS:
+                cust = DB.execute("select coalesce(phone,''), coalesce(blocked,0) from customers where chat_id=?", (a,)).fetchone()
+                ph = cust[0] if cust else ""
+                sold = DB.execute("select count(*) from orders where phone=? and status not in (6,7,13,15,8)", (ph,)).fetchone()[0] if ph else 0
+                allo = DB.execute("select count(*), coalesce(group_concat(distinct status),'') from orders where phone=?", (ph,)).fetchone() if ph else (0, "")
+                lines.append(f"admin {a}: в_customers={'так' if cust else 'НІ'} · телефон={'є' if ph else 'нема'} · blocked={'так' if cust and cust[1] else 'ні'} · SOLD-замовлень={sold} · усього_замовлень={allo[0]} (статуси: {allo[1] or '—'}) · у_сегменті={'ТАК' if a in in_seg else 'НІ'}")
+            self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
+            self.wfile.write("\n".join(lines).encode()); return
         if u.path == "/confirm":  # публічний: сторінка підтвердження замовлення (NOREPLY-нудж)
             oid = qs.get("order", [""])[0]; do = qs.get("do", [""])[0]; reason = qs.get("r", [""])[0]
             test = qs.get("test", [""])[0] == "1"; token = qs.get("t", [""])[0]
