@@ -1199,7 +1199,9 @@ def on_callback(cb):
         DB.execute("update customers set stage=? where chat_id=?", (stage, chat_id))
         DB.execute("insert or ignore into sent values(?,?,?)", (chat_id, "promo0", time.time()))
         DB.execute("insert or ignore into sent values(?,?,?)", (chat_id, f"promoans:{kind}", time.time())); DB.commit()
-        send(chat_id, T["promo_code"], [[("Обрати на Mamulya.lviv", "https://mamulya.lviv.ua")]])
+        _src = (DB.execute("select src from customers where chat_id=?", (chat_id,)).fetchone() or [""])[0] or ""
+        _camp = _src if _src.startswith("blog_") else "promo"  # blog readers → utm_campaign=blog_<slug> for per-article revenue in CRM
+        send(chat_id, T["promo_code"], [[("Обрати на Mamulya.lviv", add_utm("https://mamulya.lviv.ua", _camp))]])
         if kind == "mama":
             send(chat_id, "І щоб підказувати корисне за віком: напишіть дату народження малюка (наприклад 15.03.2026) 😊")
         return
@@ -1528,14 +1530,15 @@ def cron():
     while True:
         now = time.time()
         for chat_id, ts0 in DB.execute("select s.chat_id, s.ts from sent s where s.key='promo0'"):
-            cust = DB.execute("select phone, created from customers where chat_id=?", (chat_id,)).fetchone()
+            cust = DB.execute("select phone, created, coalesce(src,'') from customers where chat_id=?", (chat_id,)).fetchone()
             if not cust: continue
             has_order = cust[0] and DB.execute("select 1 from orders where phone=? limit 1", (cust[0],)).fetchone()
             if has_order: continue
+            camp = cust[2] if cust[2].startswith("blog_") else "promo"  # per-article attribution for blog readers
             for days, key, tkey in ((2, "promo_r1", "promo_r1"), (5, "promo_r2", "promo_r2"), (10, "promo_r3", "promo_r3")):
                 if now - (ts0 or 0) >= days * DAY and not DB.execute("select 1 from sent where chat_id=? and key=?", (chat_id, key)).fetchone():
                     try:
-                        send(chat_id, T[tkey], [[("На Mamulya.lviv", add_utm("https://mamulya.lviv.ua", "promo"))]])
+                        send(chat_id, T[tkey], [[("На Mamulya.lviv", add_utm("https://mamulya.lviv.ua", camp))]])
                         DB.execute("insert into sent values(?,?,?)", (chat_id, key, now))
                     except Exception as e: print("promo_rem", e)
         DB.commit()
