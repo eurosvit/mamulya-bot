@@ -535,7 +535,7 @@ def on_start(chat_id, arg):
     if not phone:
         DB.execute("insert or ignore into customers(chat_id,order_id,phone,stage,created,src) values(?, '', '', 'unknown', ?, ?)", (chat_id, time.time(), src))
         DB.execute("update customers set src=? where chat_id=? and coalesce(src,'')=''", (src, chat_id)); DB.commit()
-        if arg == "promo":
+        if arg == "promo" or arg.startswith("blog_"):  # blog_<slug>: readers from blog articles, src keeps the slug
             return send(chat_id, T["promo_intro"], [
                 [("🤰 Для себе — чекаю малюка", "promo:pregnant")],
                 [("🤱 Для себе — вже мама", "promo:mama")],
