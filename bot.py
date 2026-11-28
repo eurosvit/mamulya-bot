@@ -31,6 +31,7 @@ create table if not exists sched_excl(sid int, chat_id int, primary key(sid, cha
 create table if not exists clicks(pid int, chat_id int, ts real);
 create table if not exists maillog(k text primary key, kind text, email text, sent real, opened real default 0, entered real default 0, newuser int default 0);
 create table if not exists kpi_cache(store text, ym text, zay int, canc int, decl int, sold int, updated real, ret_num int default 0, ret_den int default 0, seo_sold int default 0, seo_rev int default 0, seo_new int default 0, seo_den int default 0, primary key(store, ym));
+create table if not exists blog_rev(slug text primary key, leads int default 0, sold int default 0, amount real default 0, updated real);
 """)
 try: DB.execute("alter table orders add column amount real default 0")
 except Exception: pass
@@ -1341,7 +1342,7 @@ def pull_all(sajts, max_pages=80):
             ot = str(o.get("orderTime") or "")[:19]  # повний час для порівняння «перше/повторне»
             if len(ot) >= 7:
                 pd = str(o.get("paymentDate") or "")[:7]  # дата продажу (міс) — для виручки за датою продажу
-                out.append((ph, ot, int(o.get("statusId") or 0), o.get("campaignId"), float(o.get("paymentAmount") or 0), (o.get("utmMedium") or "").strip().lower(), pd, as_int(o.get("rejectionReason"))))
+                out.append((ph, ot, int(o.get("statusId") or 0), o.get("campaignId"), float(o.get("paymentAmount") or 0), (o.get("utmMedium") or "").strip().lower(), pd, as_int(o.get("rejectionReason")), (o.get("utmCampaign") or "").strip()))
         if len(data) < 100: break
         page += 1; time.sleep(7)
     return out
@@ -1428,6 +1429,7 @@ def kpi_refresh():
     # один прохід по магазину (вкладаємось у 100 запитів/год SalesDrive): усе рахуємо локально
     if not os.environ.get("SALESDRIVE_KEY"): return
     from collections import defaultdict
+    blog_agg = defaultdict(lambda: [0, 0, 0.0])   # slug -> [leads, sold, amount] from utmCampaign=blog_<slug>
     for store, sajts in KPI_STORES:
         try:
             orders = pull_all(sajts)
@@ -1436,14 +1438,18 @@ def kpi_refresh():
         M = defaultdict(lambda: {"zay": 0, "canc": 0, "canc_amt": 0.0, "decl": 0, "sold": 0, "sold_amt": 0.0, "returned": 0, "seo_sold": 0, "seo_rev": 0.0, "bot_n": 0, "bot_amt": 0.0})
         # повторні рахуємо ЛИШЕ по SOLD (реально отримане) — інакше ловимо дублі-заявки
         first = {}
-        for ph, ot, st, camp, amt, utm, pd, rr in orders:
+        for ph, ot, st, camp, amt, utm, pd, rr, uc in orders:
             if ph and st == 5:
                 if ph not in first or ot < first[ph]: first[ph] = ot
         buyers = defaultdict(set); repeat = defaultdict(set)
         seo_buyers = defaultdict(set); seo_new = defaultdict(set)
         SD = defaultdict(lambda: [0, 0.0])   # SOLD за ДАТОЮ ПРОДАЖУ (paymentDate) — реальна виручка місяця
-        for ph, ot, st, camp, amt, utm, pd, rr in orders:
+        for ph, ot, st, camp, amt, utm, pd, rr, uc in orders:
             if st == 13 and rr == 109: continue   # «Дубль замовлення» — не реальна заявка, не рахуємо ніде
+            if uc.startswith("blog_"):            # виручка за статтею блогу (utmCampaign=blog_<slug>)
+                slug = uc[5:]
+                if st not in (15, 8): blog_agg[slug][0] += 1
+                if st == 5: blog_agg[slug][1] += 1; blog_agg[slug][2] += amt
             if st == 5 and pd: SD[pd][0] += 1; SD[pd][1] += amt
             ym = ot[:7]
             organic = not camp   # «без реклами» (порожня кампанія) = органіка/прямі = SEO
@@ -1484,6 +1490,11 @@ def kpi_refresh():
             for ym, s in ga_sessions(prop, None).items():   # усі канали (весь трафік) для KPI
                 if ym >= "2026-01": DB.execute("update kpi_cache set sess_all=? where store=? and ym=?", (s, store, ym))
             DB.commit()
+    # блогова виручка за статтею — перезаписуємо повністю (тягнеться з того ж проходу, 0 зайвих запитів)
+    DB.execute("delete from blog_rev")
+    for slug, (leads, sold, amt) in blog_agg.items():
+        DB.execute("insert into blog_rev(slug,leads,sold,amount,updated) values(?,?,?,?,?)", (slug, leads, sold, round(amt), time.time()))
+    DB.commit()
     # «Усі магазини» за датою продажу — прямий запит без фільтра sajt (= те, що видно в CRM), останні 4 міс
     for ym in recent_months(4):
         try:
@@ -3352,7 +3363,15 @@ def admin_page():
 
     SRC_UA = {"sms": "SMS", "qr": "QR з пакування", "web": "сайт", "migrate": "міграція", "direct": "самі знайшли", "promo": "попап −7%", "loyal": "SMS лояльність", "blog": "📖 Блог (усі статті)", "—": "—"}
     src_ua = lambda s: ("📖 " + s[5:]) if s and s.startswith("blog_") else SRC_UA.get(s, s)
-    blog_tbl = "".join(f"<tr><td>📖 {a}</td><td class=n>{ent}</td><td class=n>{wph}</td><td class=n>{bgt}</td></tr>" for a, ent, wph, bgt in blog_arts) or "<tr><td colspan=4>ще нема переходів з блогу</td></tr>"
+    blog_bot = {a: ent for a, ent, wph, bgt in blog_arts}                        # slug -> зайшли в бот
+    blog_crm = {s: (l, so, am) for s, l, so, am in q("select slug,leads,sold,amount from blog_rev")}  # slug -> (заявок, продано, грн) з SalesDrive
+    _blog_slugs = sorted(set(blog_bot) | set(blog_crm), key=lambda s: (-blog_crm.get(s, (0, 0, 0))[2], -blog_bot.get(s, 0)))
+    blog_tbl = "".join(
+        f"<tr><td>📖 {s}</td><td class=n>{blog_bot.get(s, 0) or '—'}</td>"
+        f"<td class=n>{blog_crm.get(s, (0, 0, 0))[0] or '—'}</td>"
+        f"<td class=n>{blog_crm.get(s, (0, 0, 0))[1] or '—'}</td>"
+        f"<td class=n>{(format(int(blog_crm[s][2]), ',').replace(',', ' ')) if s in blog_crm and blog_crm[s][2] else '—'}</td></tr>"
+        for s in _blog_slugs) or "<tr><td colspan=5>ще нема переходів з блогу</td></tr>"
     fun = f"""<tr><td>Замовлень з 10.09</td><td class=n>{orders_since}</td><td></td></tr>
 <tr><td><b>Перейшли в бот</b></td><td class=n><b>{entered}</b></td><td class=n><b>{conv}</b></td></tr>"""
     for st in sorted(set(bso) | set(bse), key=lambda x: -bso.get(x, 0)):
@@ -3419,7 +3438,7 @@ def admin_page():
 <div class=grid>
 {panel("Воронка · SMS → бот → подарунки <small>лише магазини програми</small>", f"<table>{fun}</table>")}
 {panel("Звідки прийшли в бот", f"<table>{rows(srcs, SRC_UA)}</table>")}
-{panel("📖 Блог → бот <small>за статтею</small>", f"<table><tr><th>Стаття</th><th>У бот</th><th>Лишили №</th><th>Купили</th></tr>{blog_tbl}</table>")}
+{panel("📖 Блог → бот → продажі <small>за статтею · виручка з SalesDrive (utm_campaign)</small>", f"<table><tr><th>Стаття</th><th>У бот</th><th>Заявок<br><small>CRM</small></th><th>Продано<br><small>CRM</small></th><th>Виручка, грн</th></tr>{blog_tbl}</table>")}
 {panel("Міграція зі старого бота", f"<table>{mg_rows}</table>")}
 {panel("Попап −7% (велком-потік)", f"<table>{pr_rows}</table>")}
 {panel("По днях", f"<table><tr><th>Дата</th><th>Замовл.</th><th>У бот</th><th>Конв.</th></tr>{daily_rows}</table>", extra=" <small>останні 14 днів</small>")}
