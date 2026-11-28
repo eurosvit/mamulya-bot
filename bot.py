@@ -3295,7 +3295,12 @@ def admin_page():
         + mrow("Взяли подарунок", mg_gift, mg_in or 1))
     stages = q("select stage,count(*) from customers group by stage order by 2 desc")
     stores = q("select coalesce(nullif(store,''),'інше'), count(*) from orders group by 1 order by 2 desc")
-    srcs = q("select coalesce(nullif(src,''),'—'), count(*) from customers group by 1 order by 2 desc")
+    srcs = q("select case when src like 'blog_%' then 'blog' else coalesce(nullif(src,''),'—') end, count(*) from customers group by 1 order by 2 desc")
+    # blog readers per article (src = blog_<slug>): entered → left phone → traced to a real order
+    blog_arts = q("""select substr(src,6), count(*),
+        sum(case when coalesce(phone,'')!='' then 1 else 0 end),
+        sum(case when coalesce(phone,'')!='' and exists(select 1 from orders o where o.phone=customers.phone and o.status not in (6,7,13,15,8)) then 1 else 0 end)
+        from customers where src like 'blog_%' group by 1 order by 2 desc""")
     gifts = q("select gift,count(*) from gifts group by gift order by 2 desc")
     base = base_levels()
     lvl_counts = {}
@@ -3342,7 +3347,9 @@ def admin_page():
             out += f"<tr><td>{label}</td><td class=n>{v}</td><td class=n>{v/tot*100:.0f}%</td><td class=b><i style=width:{int(v/mx*100)}%></i></td></tr>"
         return out
 
-    SRC_UA = {"sms": "SMS", "qr": "QR з пакування", "web": "сайт", "migrate": "міграція", "direct": "самі знайшли", "promo": "попап −7%", "loyal": "SMS лояльність", "—": "—"}
+    SRC_UA = {"sms": "SMS", "qr": "QR з пакування", "web": "сайт", "migrate": "міграція", "direct": "самі знайшли", "promo": "попап −7%", "loyal": "SMS лояльність", "blog": "📖 Блог (усі статті)", "—": "—"}
+    src_ua = lambda s: ("📖 " + s[5:]) if s and s.startswith("blog_") else SRC_UA.get(s, s)
+    blog_tbl = "".join(f"<tr><td>📖 {a}</td><td class=n>{ent}</td><td class=n>{wph}</td><td class=n>{bgt}</td></tr>" for a, ent, wph, bgt in blog_arts) or "<tr><td colspan=4>ще нема переходів з блогу</td></tr>"
     fun = f"""<tr><td>Замовлень з 10.09</td><td class=n>{orders_since}</td><td></td></tr>
 <tr><td><b>Перейшли в бот</b></td><td class=n><b>{entered}</b></td><td class=n><b>{conv}</b></td></tr>"""
     for st in sorted(set(bso) | set(bse), key=lambda x: -bso.get(x, 0)):
@@ -3378,7 +3385,7 @@ def admin_page():
         return "💜 "
     def _ccls(r):
         return ("named" if r[2] != '—' else "noname") + (" popup" if (r[7] == "promo" and not r[9]) else "")
-    cust_rows = "".join(f"<tr class='crow {_ccls(r)}'><td>{_icon(r[9])}<a href=/client?key={AK}&id={r[0]}>{r[2] if r[2]!='—' else r[0]}</a></td><td>{r[1]}</td><td>{r[8]}</td><td>{STAGE_UA.get(r[3], r[3])}</td><td>{r[4] or '—'}</td><td>{SRC_UA.get(r[7], r[7])}</td><td class=n>{r[5][5:16]}</td><td class=n>{('🔔 ' + str(r[10])) if r[10] else '—'}</td><td class=n>{r[6]}</td><td class=n>{r[9]:,.0f}".replace(",", " ") + f"</td><td class=n>{_disc(r[9])}</td></tr>" for r in cust)
+    cust_rows = "".join(f"<tr class='crow {_ccls(r)}'><td>{_icon(r[9])}<a href=/client?key={AK}&id={r[0]}>{r[2] if r[2]!='—' else r[0]}</a></td><td>{r[1]}</td><td>{r[8]}</td><td>{STAGE_UA.get(r[3], r[3])}</td><td>{r[4] or '—'}</td><td>{src_ua(r[7])}</td><td class=n>{r[5][5:16]}</td><td class=n>{('🔔 ' + str(r[10])) if r[10] else '—'}</td><td class=n>{r[6]}</td><td class=n>{r[9]:,.0f}".replace(",", " ") + f"</td><td class=n>{_disc(r[9])}</td></tr>" for r in cust)
     n_all = len(cust); n_named = sum(1 for r in cust if r[2] != '—'); n_popup = sum(1 for r in cust if r[7] == "promo" and not r[9])
     cust_filter = ("<style>.cfilt button{background:#fff;border:1px solid #e9d9d3;color:#6E5F65;border-radius:999px;padding:6px 14px;font-size:13px;cursor:pointer}.cfilt button.on{background:#C94F72;color:#fff;border-color:#C94F72}.cfilt b{font-weight:700}</style>"
         "<div class=cfilt style='margin:0 0 10px;display:flex;gap:8px;flex-wrap:wrap'>"
@@ -3409,6 +3416,7 @@ def admin_page():
 <div class=grid>
 {panel("Воронка · SMS → бот → подарунки <small>лише магазини програми</small>", f"<table>{fun}</table>")}
 {panel("Звідки прийшли в бот", f"<table>{rows(srcs, SRC_UA)}</table>")}
+{panel("📖 Блог → бот <small>за статтею</small>", f"<table><tr><th>Стаття</th><th>У бот</th><th>Лишили №</th><th>Купили</th></tr>{blog_tbl}</table>")}
 {panel("Міграція зі старого бота", f"<table>{mg_rows}</table>")}
 {panel("Попап −7% (велком-потік)", f"<table>{pr_rows}</table>")}
 {panel("По днях", f"<table><tr><th>Дата</th><th>Замовл.</th><th>У бот</th><th>Конв.</th></tr>{daily_rows}</table>", extra=" <small>останні 14 днів</small>")}
